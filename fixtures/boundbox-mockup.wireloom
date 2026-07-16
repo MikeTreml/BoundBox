@@ -1,0 +1,42 @@
+window "BoundBox — layout sketcher":
+  header:
+    row:
+      text "BoundBox" bold size=large
+      spacer
+      button "" icon="gear"
+  row:
+    col 200:
+      section "Tools":
+        list:
+          item "Select"
+          item "Draw box"
+          item "Pan / zoom"
+      section "Boxes":
+        list:
+          slot "hero" chevron:
+            text "Hero banner image" size=small muted
+          slot "nav" chevron:
+            text "Top navigation bar" size=small muted
+          slot "cta" chevron:
+            text "Sign-up button" size=small muted
+    col:
+      panel:
+        image label="Canvas — drag to draw labeled boxes" height=300 id="canvas"
+    col 250:
+      section "Selected box":
+        kv "Label" "hero"
+        input placeholder="Describe what goes here" id="desc-field"
+        kv "X" "40"
+        kv "Y" "120"
+        kv "W" "880"
+        kv "H" "320"
+        kv "Type" "Object"
+      section "Export":
+        kv "Grid" "0–1000 normalized"
+        kv "Order" "x, y, w, h"
+  footer:
+    button "Export PNG"
+    button "Copy JSON" primary id="copy-json"
+
+annotation "The AI reads each box's label +\ndescription with its coordinates" target="canvas" position=left
+annotation "One click copies the layout as\nJSON to paste into any AI prompt" target="copy-json" position=right

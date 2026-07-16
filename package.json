@@ -1,0 +1,20 @@
+{
+  "name": "boundbox",
+  "version": "0.1.0",
+  "description": "Draw labeled boxes over a blank canvas, a Wireloom wireframe, or a reference image, and hand the layout to an AI as JSON. Ships as a JIT skill: launched on demand, nothing running in the background.",
+  "type": "module",
+  "license": "MIT",
+  "scripts": {
+    "test": "vitest run",
+    "vendor": "node scripts/vendor-wireloom.mjs",
+    "extract": "node scripts/wireloom-extract.mjs",
+    "build": "node scripts/build-app.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.1",
+    "vitest": "^4.1.10"
+  }
+}
