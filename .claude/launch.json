@@ -2,9 +2,9 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "boundbox-static",
-      "runtimeExecutable": "npx",
-      "runtimeArgs": ["-y", "http-server", "app", "-p", "8543", "-c-1"],
+      "name": "boundbox",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["launch.mjs", "--dir", "./boundbox", "--port", "8543", "--idle-seconds", "1800"],
       "port": 8543
     }
   ]

@@ -10,6 +10,7 @@
 import { createEditor } from './editor.mjs';
 import { handleAt, handlePoints, boxesAt } from './geometry.mjs';
 import { loadWireframe } from './wireframe.mjs';
+import { validateProject } from './project.mjs';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const $ = (id) => document.getElementById(id);
@@ -29,6 +30,10 @@ const spritesEl = $('sprites');
 const overlay = $('overlay');
 const toastEl = $('toast');
 const banner = { wrap: $('error-banner'), text: $('error-text') };
+const projectUi = {
+  name: $('project-name'), dirty: $('dirty-dot'),
+  open: $('open-project'), save: $('save-project'),
+};
 
 const props = {
   wrap: $('box-props'), empty: $('empty-state'), boundInfo: $('bound-info'),
@@ -77,13 +82,48 @@ const syncInput = (input, value) => {
 const rectsDiffer = (a, b) => Math.round(a.x) !== Math.round(b.x) || Math.round(a.y) !== Math.round(b.y)
   || Math.round(a.w) !== Math.round(b.w) || Math.round(a.h) !== Math.round(b.h);
 
+// --- project dirty state -------------------------------------------------------
+// Fingerprints deliberately omit selection, interaction, and undo history. Undo
+// back to the saved document therefore becomes clean without bookkeeping in
+// every editor command.
+let cleanProjectJson;
+let hasProjectFile = false;
+let launcherConnected = true;
+const projectSnapshot = () => editor.toProject({ zoom });
+const projectFingerprint = () => JSON.stringify(projectSnapshot());
+const hasActiveDraft = () => {
+  const active = document.activeElement;
+  return typeof active?.__projectValue === 'function'
+    && String(active.value) !== String(active.__projectValue());
+};
+const isProjectDirty = () => cleanProjectJson !== undefined
+  && (projectFingerprint() !== cleanProjectJson || hasActiveDraft());
+const updateProjectStatus = () => {
+  const dirty = isProjectDirty();
+  projectUi.dirty.hidden = !dirty;
+  projectUi.name.textContent = hasProjectFile ? 'project.json' : 'New project';
+  $('launcher-status').hidden = launcherConnected;
+  $('project-status').title = dirty
+    ? 'Unsaved project changes - Save project writes ./boundbox/project.json'
+    : (hasProjectFile ? 'Project is saved at ./boundbox/project.json' : 'No project file saved yet');
+};
+const setProjectBaseline = (project, { exists = true } = {}) => {
+  cleanProjectJson = JSON.stringify(project);
+  hasProjectFile = exists;
+  updateProjectStatus();
+};
+
 // --- zoom ----------------------------------------------------------------------
 const applyZoom = () => {
   canvasEl.style.transform = `scale(${zoom})`;
   canvasEl.style.transformOrigin = 'center center';
   $('zoom-fit').textContent = `${Math.round(zoom * 100)}%`;
 };
-const setZoom = (z) => { zoom = Math.min(Math.max(z, 0.1), 4); applyZoom(); };
+const setZoom = (z) => {
+  zoom = Math.min(Math.max(z, 0.1), 4);
+  applyZoom();
+  updateProjectStatus();
+};
 const fitZoom = () => {
   const ws = $('workspace').getBoundingClientRect();
   setZoom(Math.min((ws.width - 56) / state.canvas.w, (ws.height - 56) / state.canvas.h, 1));
@@ -207,11 +247,15 @@ function render() {
   renderSprites();
 
   // Header / mode chrome
-  $('mode-badge').textContent = state.mode === 'iterate' ? 'Iterate' : 'Sketch';
+  const recovering = state.mode === 'sketch' && state.wireframe?.recovery;
+  $('mode-badge').textContent = recovering ? 'Recovery' : (state.mode === 'iterate' ? 'Iterate' : 'Sketch');
   $('reload-source').hidden = state.mode !== 'iterate';
   $('clear-source').hidden = state.mode !== 'iterate';
   $('load-source').hidden = state.mode === 'iterate';
-  $('save').textContent = state.mode === 'iterate' ? 'Save edits for AI' : 'Save for AI';
+  $('save').textContent = recovering ? 'Repair source first' : (state.mode === 'iterate' ? 'Save edits for AI' : 'Save for AI');
+  $('save').disabled = recovering;
+  $('copy-json').disabled = recovering;
+  $('copy-json').title = recovering ? 'Repair/reload the Wireloom source before exporting' : '';
 
   // Sidebar
   const box = editor.selectedBox();
@@ -254,6 +298,7 @@ function render() {
     ? `${state.boxes.length} elements — ${editor.toPayload().edits.length} pending edit(s)`
     : `${state.boxes.length} box${state.boxes.length === 1 ? '' : 'es'}`;
   $('box-count').textContent = `${counts} — ${state.canvas.w} × ${state.canvas.h} canvas`;
+  updateProjectStatus();
 }
 
 function updateCursor(point) {
@@ -291,7 +336,10 @@ const applySource = (text) => {
   }
   banner.wrap.hidden = true;
   sourceVersion += 1;
-  editor.loadWireframe({ bindings: wf.bindings, size: wf.size, sourceText: text, version: sourceVersion });
+  const wasRecovering = state.mode === 'sketch' && state.wireframe?.recovery;
+  const restored = wasRecovering
+    ? editor.recoverWireframe({ bindings: wf.bindings, size: wf.size, sourceText: text, version: sourceVersion })
+    : (editor.loadWireframe({ bindings: wf.bindings, size: wf.size, sourceText: text, version: sourceVersion }), null);
   backgroundEl.innerHTML = wf.svg;
   backgroundSvg = backgroundEl.querySelector('svg');
   // The SVG keeps its intrinsic (exact, possibly fractional) size so background
@@ -299,7 +347,10 @@ const applySource = (text) => {
   // sub-pixel margin at the far edges instead of stretching (review fix).
   fitZoom();
   render();
-  toast(`Wireframe loaded (v${sourceVersion}) — ${wf.bindings.length} elements bound.`);
+  if (restored?.warnings.length) {
+    showError(`Repaired Wireloom loaded, but ${restored.warnings.length} pending edit(s) could not be rebound: ${restored.warnings.map(targetSummary).join('; ')}.`);
+  }
+  toast(`${wasRecovering ? 'Recovered' : 'Wireframe loaded'} (v${sourceVersion}) — ${wf.bindings.length} elements bound.`);
   return true;
 };
 
@@ -327,6 +378,21 @@ $('clear-source').addEventListener('click', () => {
   backgroundEl.replaceChildren();
   backgroundSvg = null;
   render();
+});
+$('reset-workspace').addEventListener('click', () => {
+  if (!window.confirm('Reset to a blank canvas? Saved exchange files and history will remain available.')) return;
+  if (isTyping()) cancelFieldEdit(document.activeElement);
+  editor.resetProject();
+  sourceVersion = 0;
+  backgroundEl.replaceChildren();
+  backgroundSvg = null;
+  banner.wrap.hidden = true;
+  fitZoom();
+  // With no saved file, Reset defines the clean blank workspace. With a saved
+  // project, keep its baseline so Reset is visibly unsaved and Open can restore.
+  if (!hasProjectFile) setProjectBaseline(projectSnapshot(), { exists: false });
+  render();
+  toast('Workspace reset. Saved project.json and history were not deleted.');
 });
 
 // --- pointer wiring -------------------------------------------------------------
@@ -394,6 +460,12 @@ window.addEventListener('keydown', (event) => {
     render();
     return;
   }
+  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
+    event.preventDefault();
+    if (isTyping()) document.activeElement.blur(); // commit the active field first
+    saveProject();
+    return;
+  }
   if (isTyping()) return; // native editing keeps its own keys, incl. Ctrl+Z
   if (event.key === 'Delete' || event.key === 'Backspace') {
     editor.deleteSelection();
@@ -420,6 +492,10 @@ const boxFieldValue = (box, field) => {
 };
 
 const bindBoxField = (input, field) => {
+  input.__projectValue = () => {
+    const box = editor.selectedBox();
+    return box ? boxFieldValue(box, field) : input.value;
+  };
   input.__resync = () => {
     const box = editor.selectedBox();
     if (box) input.value = boxFieldValue(box, field);
@@ -430,6 +506,7 @@ const bindBoxField = (input, field) => {
     render();
     input.__resync(); // even while focused: rejected/clamped edits must not display stale text (review fix)
   });
+  input.addEventListener('input', updateProjectStatus);
 };
 bindBoxField(props.label, 'label');
 bindBoxField(props.desc, 'description');
@@ -443,14 +520,17 @@ bindBoxField(props.h, 'h');
 props.deleteBtn.addEventListener('click', () => { editor.deleteSelection(); render(); });
 
 for (const [field, input] of Object.entries(ctx)) {
+  input.__projectValue = () => state.context[field];
   input.__resync = () => { input.value = state.context[field]; };
   input.addEventListener('change', () => {
     if (cancelingEdit) return;
     editor.setContextField(field, input.value);
     render();
   });
+  input.addEventListener('input', updateProjectStatus);
 }
 const bindCanvasInput = (input) => {
+  input.__projectValue = () => (input === canvasInputs.w ? state.canvas.w : state.canvas.h);
   input.__resync = () => { input.value = input === canvasInputs.w ? state.canvas.w : state.canvas.h; };
   input.addEventListener('change', () => {
     if (cancelingEdit) return;
@@ -459,9 +539,189 @@ const bindCanvasInput = (input) => {
     canvasInputs.w.__resync();
     canvasInputs.h.__resync();
   });
+  input.addEventListener('input', updateProjectStatus);
 };
 bindCanvasInput(canvasInputs.w);
 bindCanvasInput(canvasInputs.h);
+
+// --- project persistence ---------------------------------------------------------
+const targetSummary = (warning) => {
+  const { target } = warning;
+  return `line ${target.line} ${target.kind} "${target.label}"`;
+};
+let projectBusy = false;
+const setProjectBusy = (busy) => {
+  projectBusy = busy;
+  projectUi.open.disabled = busy;
+  projectUi.save.disabled = busy;
+};
+
+const openProject = async ({ silentMissing = false } = {}) => {
+  if (projectBusy) return false;
+  if (isProjectDirty() && !window.confirm('Open project.json and discard your unsaved project changes?')) return false;
+  const stateBeforeFetch = projectFingerprint();
+  setProjectBusy(true);
+  try {
+    const res = await fetch(silentMissing ? 'project?optional=1' : 'project', { cache: 'no-store' });
+    if (res.status === 204 || res.status === 404) {
+      if (!silentMissing) toast('No project.json in the exchange folder yet.');
+      return false;
+    }
+    if (!res.ok) {
+      toast(`Open project failed (${res.status}).`);
+      return false;
+    }
+
+    let project;
+    try {
+      project = validateProject(JSON.parse(await res.text()));
+    } catch (err) {
+      showError(`Project could not be opened: ${err.message}. Your current canvas was not changed.`);
+      return false;
+    }
+
+    let wf = null;
+    let sourceError = null;
+    if (project.mode === 'iterate') {
+      try {
+        wf = loadWireframe(project.wireframe.sourceText);
+      } catch (err) {
+        sourceError = err;
+      }
+    }
+
+    // The local fetch is normally instant, but never discard an edit made
+    // while it was in flight without a fresh confirmation.
+    if ((projectFingerprint() !== stateBeforeFetch || hasActiveDraft())
+      && !window.confirm('The canvas changed while project.json was loading. Discard those newer changes and continue?')) {
+      return false;
+    }
+    if (isTyping()) cancelFieldEdit(document.activeElement);
+
+    let restored;
+    try {
+      restored = editor.loadProject(project, wf ? { bindings: wf.bindings, size: wf.size } : {});
+    } catch (err) {
+      showError(`Project could not be opened: ${err.message}. Your current canvas was not changed.`);
+      return false;
+    }
+
+    sourceVersion = state.wireframe?.version ?? 0;
+    if (wf) {
+      backgroundEl.innerHTML = wf.svg;
+      backgroundSvg = backgroundEl.querySelector('svg');
+    } else {
+      backgroundEl.replaceChildren();
+      backgroundSvg = null;
+    }
+    let baselineProject = project;
+    if (restored.options.zoom !== undefined) {
+      zoom = restored.options.zoom;
+      applyZoom();
+    } else {
+      fitZoom();
+      baselineProject = { ...project, options: { ...project.options, zoom } };
+    }
+
+    // Baseline the exact file that was opened. Reconciliation/fallback changes
+    // remain visibly dirty because the current fingerprint will differ.
+    setProjectBaseline(baselineProject);
+    render();
+    if (sourceError) {
+      const where = sourceError.line ? ` (line ${sourceError.line}, col ${sourceError.column})` : '';
+      showError(`Project opened in sketch recovery mode because its Wireloom source failed to parse${where}: ${sourceError.message}. The source is preserved in project state; save only after reviewing the recovered boxes.`);
+      return true;
+    }
+    if (restored.warnings.length) {
+      showError(`Project opened, but ${restored.warnings.length} pending edit(s) no longer matched the fresh wireframe and were dropped: ${restored.warnings.map(targetSummary).join('; ')}.`);
+    } else {
+      banner.wrap.hidden = true;
+      toast(`Opened project.json - ${state.boxes.length} box${state.boxes.length === 1 ? '' : 'es'} restored.`);
+    }
+    return true;
+  } catch {
+    toast('Open project failed: the launcher is not reachable.');
+    return false;
+  } finally {
+    setProjectBusy(false);
+  }
+};
+
+const saveProject = async () => {
+  if (projectBusy) return false;
+  const payload = projectSnapshot();
+  const sentFingerprint = JSON.stringify(payload);
+  setProjectBusy(true);
+  try {
+    const res = await fetch('save', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ kind: 'project', payload }),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      toast(`Project save failed (${res.status}): ${body.error ?? 'unknown error'}.`);
+      return false;
+    }
+    cleanProjectJson = sentFingerprint; // edits made while POST was in flight remain dirty
+    hasProjectFile = true;
+    updateProjectStatus();
+    toast('Saved project.json - this session can now be reopened later.');
+    return true;
+  } catch {
+    toast('Project save failed: the launcher is not reachable.');
+    return false;
+  } finally {
+    setProjectBusy(false);
+  }
+};
+
+projectUi.open.addEventListener('click', openProject);
+projectUi.save.addEventListener('click', saveProject);
+window.addEventListener('beforeunload', (event) => {
+  if (!isProjectDirty()) return;
+  event.preventDefault();
+  event.returnValue = '';
+});
+
+// Keep the JIT launcher alive while this UI is actually present. The launcher
+// reports its timeout so even deliberately short preview settings remain safe.
+// Closing the pane stops heartbeats and normal idle cleanup resumes.
+let heartbeatTimer;
+let heartbeatInFlight = false;
+const heartbeat = async () => {
+  if (heartbeatInFlight) return;
+  clearTimeout(heartbeatTimer);
+  heartbeatInFlight = true;
+  let nextDelay = 5_000;
+  try {
+    const res = await fetch('ping', { cache: 'no-store' });
+    if (!res.ok) throw new Error(`heartbeat failed (${res.status})`);
+    const body = await res.json();
+    const timeoutMs = Number(body.idleSeconds) * 1000;
+    if (Number.isFinite(timeoutMs) && timeoutMs > 0) {
+      nextDelay = Math.max(250, Math.min(60_000, Math.floor(timeoutMs / 3)));
+    }
+    if (!launcherConnected) {
+      launcherConnected = true;
+      updateProjectStatus();
+      toast('Launcher reconnected.');
+    }
+  } catch {
+    if (launcherConnected) {
+      launcherConnected = false;
+      updateProjectStatus();
+      toast('Launcher disconnected - Refresh or relaunch BoundBox if it does not recover.');
+    }
+  } finally {
+    heartbeatInFlight = false;
+    heartbeatTimer = setTimeout(heartbeat, nextDelay);
+  }
+};
+heartbeat();
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') heartbeat();
+});
 
 // --- export actions -----------------------------------------------------------------
 $('save').addEventListener('click', async () => {
@@ -492,6 +752,11 @@ $('copy-json').addEventListener('click', async () => {
 });
 
 // --- expose for scripted verification (harmless in normal use) -----------------------
-window.__boundbox = { editor, render, applySource, setZoom, fitZoom };
+window.__boundbox = {
+  editor, render, applySource, setZoom, fitZoom,
+  openProject, saveProject, isProjectDirty,
+};
 
+setProjectBaseline(projectSnapshot(), { exists: false });
 render();
+openProject({ silentMissing: true });

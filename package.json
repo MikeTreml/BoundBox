@@ -8,7 +8,9 @@
     "test": "vitest run",
     "vendor": "node scripts/vendor-wireloom.mjs",
     "extract": "node scripts/wireloom-extract.mjs",
-    "build": "node scripts/build-app.mjs"
+    "build": "node scripts/build-app.mjs",
+    "skill:build": "node scripts/build-skill.mjs",
+    "skill:sync": "node scripts/sync-skill.mjs"
   },
   "engines": {
     "node": ">=18"

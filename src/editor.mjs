@@ -21,12 +21,14 @@ import {
 } from './geometry.mjs';
 import { buildSketchPayload } from './export.mjs';
 import { buildIteratePayload, hasPendingEdits } from './packet.mjs';
+import { serializeProject, restoreProject as prepareProjectRestore } from './project.mjs';
 
 const MAX_UNDO = 100;
 const MAX_LABEL = 40;
 const MOVE_MODES = new Set(['drawing', 'dragging', 'resizing']);
 
 export function createEditor({ canvas = { w: 1024, h: 768 } } = {}) {
+  const initialCanvas = { ...canvas };
   const state = {
     mode: 'sketch', // sketch | iterate
     canvas: { ...canvas },
@@ -368,7 +370,7 @@ export function createEditor({ canvas = { w: 1024, h: 768 } } = {}) {
     if (!wStr || !hStr) return false;
     const width = Math.round(Number(wStr));
     const height = Math.round(Number(hStr));
-    if (!Number.isFinite(width) || !Number.isFinite(height) || width < 64 || height < 64) return false;
+    if (!Number.isSafeInteger(width) || !Number.isSafeInteger(height) || width < 64 || height < 64) return false;
     if (width === state.canvas.w && height === state.canvas.h) return true;
     pushUndo(docSnapshot());
     state.canvas = { w: width, h: height };
@@ -407,6 +409,60 @@ export function createEditor({ canvas = { w: 1024, h: 768 } } = {}) {
     );
   };
 
+  /** Durable, versioned project snapshot. Selection and undo history are transient. */
+  const toProject = (options = {}) => serializeProject(state, options);
+
+  /**
+   * Atomically replace the document from a validated project. The app supplies
+   * freshly parsed/layouted bindings for iterate mode; omitting them activates
+   * the documented sketch recovery fallback for an unparseable source.
+   */
+  const loadProject = (project, derived = {}) => {
+    const prepared = prepareProjectRestore(project, derived); // may throw; state is untouched
+    const next = prepared.state;
+    state.mode = next.mode;
+    state.canvas = next.canvas;
+    state.boxes = next.boxes;
+    state.selectedId = null;
+    state.counter = next.counter;
+    state.context = next.context;
+    state.wireframe = next.wireframe;
+    state.interaction = { mode: 'idle' };
+    state.lastClick = null;
+    undoStack.length = 0;
+    redoStack.length = 0;
+    return prepared;
+  };
+
+  /** Re-bind a grammar-drift recovery document without discarding its intent. */
+  const recoverWireframe = ({ bindings, size, sourceText, version }) => {
+    if (state.mode !== 'sketch' || !state.wireframe?.recovery) return null;
+    const project = toProject();
+    project.mode = 'iterate';
+    project.wireframe = {
+      ...project.wireframe,
+      version,
+      sourceText,
+      recovery: false,
+    };
+    return loadProject(project, { bindings, size });
+  };
+
+  /** Return the in-memory workspace to a blank sketch; disk/history are app concerns. */
+  const resetProject = () => {
+    state.mode = 'sketch';
+    state.canvas = { ...initialCanvas };
+    state.boxes = [];
+    state.selectedId = null;
+    state.counter = 0;
+    state.context = { description: '', style: '', background: '' };
+    state.wireframe = null;
+    state.interaction = { mode: 'idle' };
+    state.lastClick = null;
+    undoStack.length = 0;
+    redoStack.length = 0;
+  };
+
   return {
     state,
     pointerDown,
@@ -420,6 +476,10 @@ export function createEditor({ canvas = { w: 1024, h: 768 } } = {}) {
     undo,
     redo,
     toPayload,
+    toProject,
+    loadProject,
+    recoverWireframe,
+    resetProject,
     selectedBox,
     loadWireframe,
     clearWireframe,

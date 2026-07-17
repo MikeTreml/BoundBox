@@ -20,6 +20,8 @@ import { fileURLToPath } from 'node:url';
 import { reconcile, readJournal, renameWithRetry } from './src/journal.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
+const appPath = [join(here, 'app', 'boundbox.html'), join(here, 'boundbox.html')]
+  .find((path) => existsSync(path));
 
 // --- CLI args ---------------------------------------------------------------
 const args = process.argv.slice(2);
@@ -73,22 +75,57 @@ const atomicWrite = (filename, text) => {
 };
 
 const respond = (res, status, body, type = 'application/json') => {
-  res.writeHead(status, { 'content-type': type });
+  res.writeHead(status, { 'content-type': type, 'cache-control': 'no-store' });
   res.end(typeof body === 'string' ? body : JSON.stringify(body));
 };
 
+const requestOriginFor = (req) => {
+  try {
+    const origin = new URL(`http://${req.headers.host}`).origin;
+    const hostname = new URL(origin).hostname;
+    return hostname === '127.0.0.1' || hostname === 'localhost' ? origin : null;
+  } catch {
+    return null;
+  }
+};
+
 const server = http.createServer((req, res) => {
-  lastActivity = Date.now();
-  const [, reqToken, ...rest] = req.url.split('?')[0].split('/');
+  const requestUrl = new URL(req.url, 'http://127.0.0.1');
+  const requestPath = requestUrl.pathname;
+  const requestOrigin = requestOriginFor(req);
+  // Reject DNS-rebinding Host headers before exposing the bearer token or any
+  // exchange data. Browser state changes must also be same-origin; non-browser
+  // local clients normally omit Origin and authenticate with the token.
+  if (!requestOrigin) return respond(res, 404, { error: 'not found' });
+  if (req.method === 'POST' && req.headers.origin) {
+    let originMatches = false;
+    try { originMatches = new URL(req.headers.origin).origin === requestOrigin; } catch { /* reject below */ }
+    if (!originMatches) return respond(res, 403, { error: 'cross-origin writes are not allowed' });
+  }
+  // Integrated preview panes know the configured port, not the random session
+  // token. A same-origin navigation to / enters the protected app; all data
+  // routes still require the token in their path.
+  if (req.method === 'GET' && requestPath === '/') {
+    res.writeHead(302, { location: `/${token}/`, 'cache-control': 'no-store' });
+    res.end();
+    return;
+  }
+  const [, reqToken, ...rest] = requestPath.split('/');
   if (reqToken !== token) return respond(res, 404, { error: 'not found' });
+  lastActivity = Date.now();
   const route = rest.join('/');
 
   if (req.method === 'GET' && route === '') {
     try {
-      return respond(res, 200, readFileSync(join(here, 'app', 'boundbox.html'), 'utf8'), 'text/html; charset=utf-8');
+      if (!appPath) throw new Error('boundbox.html missing');
+      return respond(res, 200, readFileSync(appPath, 'utf8'), 'text/html; charset=utf-8');
     } catch {
-      return respond(res, 500, { error: 'app/boundbox.html missing' });
+      return respond(res, 500, { error: 'boundbox.html missing (expected app/boundbox.html or a sibling bundle file)' });
     }
+  }
+
+  if (req.method === 'GET' && route === 'ping') {
+    return respond(res, 200, { ok: true, idleSeconds });
   }
 
   if (req.method === 'GET' && route === 'source') {
@@ -96,6 +133,22 @@ const server = http.createServer((req, res) => {
     const sourcePath = join(exchangeDir, 'source.wireloom');
     if (!existsSync(sourcePath)) return respond(res, 404, { error: 'no source.wireloom in exchange folder' });
     return respond(res, 200, readFileSync(sourcePath, 'utf8'), 'text/plain; charset=utf-8');
+  }
+
+  if (req.method === 'GET' && route === 'project') {
+    try {
+      // Preserve hand edits made while the launcher is live before the app can
+      // later replace them. Validation belongs to the browser's project loader.
+      reconcile(exchangeDir, { reason: 'project-read' });
+      const projectPath = join(exchangeDir, 'project.json');
+      if (!existsSync(projectPath)) {
+        if (requestUrl.searchParams.get('optional') === '1') return respond(res, 204, '');
+        return respond(res, 404, { error: 'no project.json in exchange folder' });
+      }
+      return respond(res, 200, readFileSync(projectPath, 'utf8'), 'application/json; charset=utf-8');
+    } catch (err) {
+      return respond(res, 500, { error: `project read failed on the server: ${err.message}` });
+    }
   }
 
   if (req.method === 'GET' && route === 'history') {
@@ -113,13 +166,19 @@ const server = http.createServer((req, res) => {
       let payload;
       try {
         const parsed = JSON.parse(body);
+        if (!Object.hasOwn(parsed, 'payload')) return respond(res, 400, { error: 'payload is required' });
         payload = parsed.payload;
-        filename = OUT_FILES[parsed.kind];
+        filename = typeof parsed.kind === 'string' && Object.hasOwn(OUT_FILES, parsed.kind)
+          ? OUT_FILES[parsed.kind]
+          : undefined;
       } catch (err) {
         return respond(res, 400, { error: `invalid JSON body: ${err.message}` });
       }
       if (!filename) return respond(res, 400, { error: `kind must be one of: ${Object.keys(OUT_FILES).join(', ')}` });
       try {
+        // Journal an external/hand-edited live version before overwriting it.
+        // Hash dedupe makes this a no-op for the version already in history.
+        reconcile(exchangeDir, { reason: 'pre-save' });
         atomicWrite(filename, JSON.stringify(payload, null, 2));
         reconcile(exchangeDir, { reason: 'save' });
       } catch (err) {

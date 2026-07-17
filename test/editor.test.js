@@ -270,6 +270,7 @@ describe('editor pointer state machine', () => {
 
     expect(ed.setCanvasSize(63, 600)).toBe(false);
     expect(ed.setCanvasSize('abc', 600)).toBe(false);
+    expect(ed.setCanvasSize(Number.MAX_SAFE_INTEGER + 1, 600)).toBe(false);
     expect(ed.state.canvas).toEqual({ w: 1024, h: 768 });
     ed.undo(); // label edit
     ed.undo(); // create
