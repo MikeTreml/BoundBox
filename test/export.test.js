@@ -55,4 +55,10 @@ describe('buildSketchPayload', () => {
     expect('text' in payload.boxes[0]).toBe(false);
     expect(payload.boxes[0].type).toBe('text');
   });
+
+  it('omits the unused sketch image context field', () => {
+    const payload = buildSketchPayload([], CANVAS, { description: 'layout', image: 'ignored.png' });
+    expect(payload.description).toBe('layout');
+    expect('image' in payload).toBe(false);
+  });
 });

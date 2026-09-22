@@ -89,12 +89,21 @@ describe('iterate mode editing and packet', () => {
     expect(ed.toPayload().edits.some((e) => e.op === 'delete')).toBe(false);
   });
 
-  it('bound labels/types are read-only; geometry diffs collapse (state-diff merge)', () => {
+  it('bound labels stay read-only while type becomes semantic annotation intent', () => {
     const { ed } = freshIterateEditor();
     const box = ed.state.boxes.find((b) => b.binding?.kind === 'kv');
     ed.state.selectedId = box.id;
     expect(ed.setBoxField('label', 'nope')).toBe(false);
-    expect(ed.setBoxField('type', 'text')).toBe(false);
+    expect(ed.setBoxField('type', 'text')).toBe(true);
+    expect(ed.setBoxField('text', 'Exact copy')).toBe(true);
+    expect(ed.toPayload().edits).toContainEqual(expect.objectContaining({
+      op: 'annotate',
+      note: 'Treat this element as text with the literal value "Exact copy".',
+    }));
+
+    // Restore the baseline semantic type before testing geometry merging.
+    expect(ed.setBoxField('type', 'obj')).toBe(true);
+    expect(ed.toPayload().edits).toHaveLength(0);
 
     // Two successive moves produce ONE edit with the final geometry.
     const x0 = Math.round(box.rect.x);
@@ -122,6 +131,7 @@ describe('iterate mode editing and packet', () => {
     const adds = ed.toPayload().edits.filter((e) => e.op === 'add');
     expect(adds).toHaveLength(1);
     expect(adds[0].desc).toBe('status readout for cursor position');
+    expect(adds[0].type).toBe('obj');
     expect(ed.pendingEdits()).toBe(true);
   });
 
@@ -207,6 +217,7 @@ describe('iterate mode editing and packet', () => {
     ed.setBoxField('text', 'Buy now');
     const [add] = ed.toPayload().edits.filter((e) => e.op === 'add');
     expect(add.text).toBe('Buy now');
+    expect(add.type).toBe('text');
   });
 
   it('delete-toggle round-trips through undo/redo', () => {

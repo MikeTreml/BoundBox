@@ -179,6 +179,14 @@ export function validateProject(input) {
       if (zoom < 0.1 || zoom > 4) fail('options.zoom', 'must be between 0.1 and 4');
       project.options.zoom = zoom;
     }
+    if (input.options.gridLock !== undefined) {
+      project.options.gridLock = boolean(input.options.gridLock, 'options.gridLock');
+    }
+    if (input.options.gridStep !== undefined) {
+      const step = finite(input.options.gridStep, 'options.gridStep');
+      if (step <= 0) fail('options.gridStep', 'must be > 0');
+      project.options.gridStep = step;
+    }
   }
   return project;
 }
@@ -334,8 +342,8 @@ export function restoreProject(input, { bindings, size } = {}) {
         order: i,
         label: binding.label || binding.kind,
         description: '',
-        type: 'obj',
-        text: '',
+        type: saved?.type ?? 'obj',
+        text: saved?.text ?? '',
         note: saved?.note ?? '',
         deleted: saved?.deleted ?? false,
         origin: 'wireframe-bound',

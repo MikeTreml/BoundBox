@@ -44,7 +44,6 @@ Top-level fields:
 | `description` | string | no | Whole-layout purpose; omitted when empty. |
 | `style` | string | no | Whole-layout visual direction; omitted when empty. |
 | `background` | string | no | Whole-layout background direction; omitted when empty. |
-| `image` | string | no | Reserved sketch-export context; the current UI does not populate or persist it. |
 | `boxes` | `SketchBox[]` | yes | Sorted by the user's export order; may be empty. |
 
 `SketchBox` fields:
@@ -112,7 +111,7 @@ Annotate = { op: "annotate", target: Target, note: string }
 Move     = { op: "move",     target: Target, to: { x, y } }
 MoveSize = { op: "move",     target: Target, to: { x, y, w, h } }
 Resize   = { op: "resize",   target: Target, to: { w, h } }
-Add      = { op: "add", label: string, desc: string, bbox: [x, y, w, h], text?: string }
+Add      = { op: "add", label: string, desc: string, type: "obj" | "text", bbox: [x, y, w, h], text?: string }
 ```
 
 All `to` and `bbox` members are normalized integers. A `move` has either exactly `x,y` or exactly `x,y,w,h`; a `resize` has exactly `w,h`.
@@ -123,9 +122,12 @@ Edit derivation rules:
 
 - Moving and resizing the same target produces one `move` with all four `to` fields.
 - A geometry edit precedes an `annotate` for the same target.
+- Changing a bound element's Type to Text emits an `annotate`; when supplied,
+  its literal text value is included in that note.
 - `delete` supersedes that target's geometry and annotation edits.
-- A newly drawn box produces one `add` containing its final state.
-- `add` currently has no `type` member. Non-empty literal text is carried by optional `text`.
+- A newly drawn box produces one `add` containing its final state, including
+  `type` (`obj` or `text`).
+- Non-empty literal text is carried by optional `text` on `add` when `type` is `"text"`.
 - Geometry is compared at rounded canvas-pixel precision, so sub-pixel differences that round to the same pixel do not emit edits.
 
 ## `source.wireloom`
@@ -231,13 +233,15 @@ Validation and mode invariants:
 - Normal `sketch` mode has `wireframe: null` and cannot contain bound boxes.
 - Parse-recovery mode is represented as `mode: "sketch"` with a wireframe whose `recovery` is `true`; it may retain bound boxes, notes, deletion intent, and binding baselines until repaired source can be loaded.
 - `options.zoom`, when present, is finite and between `0.1` and `4` inclusive.
+- `options.gridLock`, when present, is a boolean. Off means placement is a rough draft (the default); on snaps draw/move/resize/nudge to `gridStep`.
+- `options.gridStep`, when present, is a finite number greater than 0, in canvas pixels. There is no maximum; small values are allowed.
 - Canonical app writes include `wireframe` and `options`. The reader also accepts an omitted `wireframe` as `null`, omitted `options` as `{}`, and omitted binding `column`, `label`, or `depth` as zero, empty string, or zero respectively. Unknown fields are discarded during validation.
 
 When reopening an iterate project, BoundBox reparses `wireframe.sourceText` and derives fresh geometry. It transfers a saved pending edit only when `(line, kind, label)` matches exactly and uniquely. Missing or ambiguous edited targets are reported rather than guessed. Only axes that differed from the saved binding baseline at rounded-pixel precision override fresh layout axes.
 
 ## History
 
-The launcher tracks exactly these live files:
+The Python exchange service tracks exactly these live files:
 
 | File | Journal direction |
 |---|---|
@@ -246,7 +250,7 @@ The launcher tracks exactly these live files:
 | `packet.json` | `user-to-ai` |
 | `project.json` | `user-to-ai` |
 
-Every content change observed at a launcher chokepoint is copied byte-for-byte into `history/`. `history/journal.jsonl` contains one JSON object per snapshot:
+Every content change observed at an exchange-service chokepoint is copied byte-for-byte into `history/`. `history/journal.jsonl` contains one JSON object per snapshot:
 
 ```text
 JournalEntry = {
@@ -263,10 +267,4 @@ JournalEntry = {
 
 `snapshot` is `${seq padded to at least five digits}_${file}`, for example `00007_packet.json`. Sequence numbers are never reused, and snapshot files are created without overwriting an existing file. Content identical to the most recently journaled version of the same live file creates no new entry.
 
-`GET {session-url}history` returns:
-
-```json
-{ "entries": [] }
-```
-
-with `JournalEntry` objects in `entries`. Treat `history/` and `journal.jsonl` as read-only. The bundled history command validates snapshot paths, preserves any unjournaled live content before a restore, and journals the restored version afterward.
+`GET {session-url}history` returns journal entries (and reconciles any unjournaled live files first). `POST {session-url}restore` with `{ "seq": <number> }` restores that snapshot through the same preserve-then-journal path as `history.py restore`. Treat `history/` and `journal.jsonl` as read-only. The bundled history command validates snapshot paths, preserves any unjournaled live content before a restore, and journals the restored version afterward.

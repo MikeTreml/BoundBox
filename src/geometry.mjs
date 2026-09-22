@@ -31,6 +31,30 @@ export function normalizeRect({ x, y, w, h }) {
  * an out-of-bounds pointer into clampRect would TRANSLATE the rect instead
  * (2026-07-16 review finding).
  */
+export function snapScalar(value, step) {
+  if (!Number.isFinite(step) || step <= 0) return value;
+  return Math.round(value / step) * step;
+}
+
+export function snapPoint(point, step) {
+  return { x: snapScalar(point.x, step), y: snapScalar(point.y, step) };
+}
+
+/** Snap all four edges, then rebuild width/height so alignment stays uniform. */
+export function snapRect(rect, step) {
+  if (!Number.isFinite(step) || step <= 0) return { ...rect };
+  const x = snapScalar(rect.x, step);
+  const y = snapScalar(rect.y, step);
+  const right = snapScalar(rect.x + rect.w, step);
+  const bottom = snapScalar(rect.y + rect.h, step);
+  return {
+    x,
+    y,
+    w: Math.max(right - x, Number.EPSILON),
+    h: Math.max(bottom - y, Number.EPSILON),
+  };
+}
+
 export function clampPoint(point, canvas) {
   return {
     x: Math.min(Math.max(point.x, 0), canvas.w),

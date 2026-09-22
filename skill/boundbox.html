@@ -10,19 +10,24 @@
   * { box-sizing: border-box; }
   [hidden] { display: none !important; }
   body { font-family: system-ui, -apple-system, sans-serif; margin: 0; height: 100vh; display: flex; flex-direction: column; background: #ecece6; color: #1d1d1f; overflow: hidden; }
-  header { display: flex; align-items: center; gap: 12px; padding: 8px 14px; background: #fff; border-bottom: 1px solid #d9d9d2; flex: 0 0 auto; }
+  header { display: flex; align-items: center; gap: 10px; padding: 8px 14px; background: #fff; border-bottom: 1px solid #d9d9d2; flex: 0 0 auto; flex-wrap: wrap; }
   header h1 { font-size: 15px; font-weight: 650; margin: 0; letter-spacing: -0.01em; }
   .badge { font-size: 11px; padding: 2px 8px; border-radius: 999px; background: #eef2ff; color: #3b4bd8; font-weight: 600; }
   .project-status { display: inline-flex; align-items: center; gap: 5px; color: #6e6e66; font-size: 11px; white-space: nowrap; }
   #dirty-dot { color: #b45309; font-size: 15px; line-height: 0; }
   .spacer { flex: 1; }
+  .tool-group, .zoom-group { display: inline-flex; gap: 2px; }
+  .tool-group button, .zoom-group button { padding: 5px 8px; min-width: 34px; }
+  .tool-group button.active, #toggle-overlay.active { background: #1d1d1f; color: #fff; border-color: #1d1d1f; }
+  .header-cluster { display: inline-flex; align-items: center; gap: 6px; }
+  .header-cluster > span { font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: #8a8a80; }
   button { font: inherit; font-size: 13px; padding: 5px 12px; border: 1px solid #c9c9c1; border-radius: 7px; background: #fff; cursor: pointer; }
   button:hover { border-color: #8a8a80; }
   button.primary { background: #1d1d1f; color: #fff; border-color: #1d1d1f; }
   button.danger { color: #b3261e; border-color: #e2b6b3; }
   main { flex: 1; display: flex; min-height: 0; }
-  #workspace { flex: 1; overflow: auto; display: grid; place-items: center; padding: 24px; }
-  #canvas { position: relative; background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,.14), 0 8px 28px rgba(0,0,0,.08); }
+  #workspace { flex: 1; overflow: hidden; position: relative; background: #ecece6; }
+  #canvas { position: absolute; left: 0; top: 0; background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,.14), 0 8px 28px rgba(0,0,0,.08); }
   #background, #overlay { position: absolute; inset: 0; }
   #background { pointer-events: none; }
   #overlay { touch-action: none; cursor: crosshair; }
@@ -56,33 +61,69 @@
   .box-chip-bg.deleted { fill: #b3261e; }
   .box-chip.deleted { text-decoration: line-through; }
   .ghost { fill: none; stroke: #9a9a90; stroke-dasharray: 3 3; stroke-width: 1; }
+  #box-list, #history-list { list-style: none; margin: 0; padding: 0; }
+  #box-list li, #history-list li { display: flex; align-items: center; gap: 6px; padding: 4px 0; border-bottom: 1px solid #eee; }
+  #box-list button, #history-list button { padding: 2px 7px; font-size: 11px; }
+  #box-list .box-list-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; background: none; border: 0; padding: 2px 0; text-align: left; }
+  #box-list .box-list-label.selected { font-weight: 650; }
+  #history-list .history-meta { flex: 1; min-width: 0; font-size: 11px; line-height: 1.35; color: #6e6e66; }
+  #history-list .history-meta strong { color: #1d1d1f; font-weight: 650; }
   #sprites { position: absolute; inset: 0; pointer-events: none; }
   #sprites .sprite { position: absolute; overflow: hidden; box-shadow: 0 2px 10px rgba(0,0,0,.15); background: #fff; outline: 1px solid rgba(124, 58, 237, .4); }
-  #bound-info { font-size: 11px; color: #7c3aed; background: #f5f0ff; border-radius: 5px; padding: 4px 7px; margin-top: 4px; }
+  .box-rect.pending { stroke-width: 2; }
+  .note-dot { fill: #b45309; }
+  .overlay-hidden .box-rect, .overlay-hidden .box-chip, .overlay-hidden .box-chip-bg,
+  .overlay-hidden .ghost, .overlay-hidden .handle, .overlay-hidden .selection-outline, .overlay-hidden .note-dot { display: none; }
+  #grid-lines { pointer-events: none; }
+  aside details { margin: 12px 0 0; }
+  aside details > summary { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: #8a8a80; cursor: pointer; }
+  .check-row { display: flex; align-items: center; gap: 8px; margin: 8px 0; font-size: 12px; color: #6e6e66; }
+  .check-row input { width: auto; }
+  .rect-grid input { width: 100%; }
+  .rect-grid span { font-size: 10px; color: #8a8a80; }
 </style>
 </head>
 <body>
 <header>
   <h1>BoundBox</h1>
   <span class="badge" id="mode-badge">Sketch</span>
+  <span id="edit-count" class="badge" hidden></span>
   <span class="project-status" id="project-status" role="status" aria-live="polite" aria-atomic="true" title="Saved projects live at ./boundbox/project.json">
     <span id="dirty-dot" hidden aria-label="Unsaved changes">&bull;</span>
     <span id="project-name">New project</span>
-    <span id="launcher-status" hidden> &middot; launcher offline</span>
+    <span id="service-status" hidden> &middot; exchange service offline</span>
+  </span>
+  <span class="header-cluster">
+    <span>Tools</span>
+    <span class="tool-group">
+      <button id="tool-select" title="Select (V)">Select</button>
+      <button id="tool-draw" class="active" title="Draw box (R)">Draw</button>
+      <button id="tool-pan" title="Pan (hold Space)">Pan</button>
+    </span>
+  </span>
+  <span class="header-cluster">
+    <span>View</span>
+    <span class="zoom-group">
+      <button id="zoom-out" title="Zoom out">−</button>
+      <button id="zoom-fit" title="Fit to window">100%</button>
+      <button id="zoom-in" title="Zoom in">+</button>
+    </span>
+    <button id="toggle-overlay" title="Hide overlay boxes (hold Alt)">Overlay</button>
   </span>
   <span class="spacer"></span>
-  <span class="zoom-group">
-    <button id="zoom-out" title="Zoom out">−</button>
-    <button id="zoom-fit" title="Fit to window">100%</button>
-    <button id="zoom-in" title="Zoom in">+</button>
+  <span class="header-cluster">
+    <span>Wireframe</span>
+    <button id="load-source" title="Load ./boundbox/source.wireloom as the background">Load</button>
+    <button id="reload-source" hidden title="Re-read source.wireloom (pending edits are flushed)">Reload</button>
+    <button id="clear-source" hidden>Clear</button>
   </span>
-  <button id="load-source" title="Load ./boundbox/source.wireloom as the background">Load wireframe</button>
-  <button id="reload-source" hidden title="Re-read source.wireloom (pending edits are flushed)">Reload</button>
-  <button id="clear-source" hidden>Clear</button>
-  <button id="reset-workspace" title="Return to a blank canvas without deleting saved files or history">Reset workspace</button>
-  <button id="open-project" title="Open ./boundbox/project.json">Open project</button>
-  <button id="save-project" title="Save the complete session to ./boundbox/project.json">Save project</button>
-  <button id="copy-json">Copy JSON</button>
+  <span class="header-cluster">
+    <span>File</span>
+    <button id="reset-workspace" title="Return to a blank canvas without deleting saved files or history">Reset</button>
+    <button id="open-project" title="Open ./boundbox/project.json">Open</button>
+    <button id="save-project" title="Save the complete session to ./boundbox/project.json">Save</button>
+    <button id="copy-json">Copy JSON</button>
+  </span>
   <button id="save" class="primary">Save for AI</button>
 </header>
 <div id="error-banner" role="alert" aria-live="assertive" hidden>
@@ -119,10 +160,12 @@
         <label for="prop-text">Literal text</label>
         <input id="prop-text" autocomplete="off" placeholder="The exact words to render">
       </div>
-      <label>Position &amp; size</label>
+      <label>Position &amp; size (px, rough unless grid lock is on)</label>
       <div class="rect-grid">
+        <span>X</span><span>Y</span>
         <input id="prop-x" type="number" title="X" aria-label="X">
         <input id="prop-y" type="number" title="Y" aria-label="Y">
+        <span>W</span><span>H</span>
         <input id="prop-w" type="number" title="Width" aria-label="Width">
         <input id="prop-h" type="number" title="Height" aria-label="Height">
       </div>
@@ -137,12 +180,31 @@
     <label for="ctx-bg">Background (optional)</label>
     <input id="ctx-bg" autocomplete="off" placeholder="e.g. soft gradient, office scene">
 
-    <h2>Canvas</h2>
-    <div class="rect-grid">
-      <input id="canvas-w" type="number" min="64" aria-label="Canvas width">
-      <input id="canvas-h" type="number" min="64" aria-label="Canvas height">
-    </div>
-    <div id="box-count"></div>
+    <h2>Boxes</h2>
+    <label class="check-row" id="pending-filter-wrap" hidden><input id="pending-only" type="checkbox"> Pending edits only</label>
+    <p id="box-list-empty" style="color:#8a8a80;margin:0 0 8px">No boxes yet.</p>
+    <ul id="box-list"></ul>
+
+    <details open>
+      <summary>Canvas &amp; grid</summary>
+      <p style="color:#8a8a80;font-size:12px;line-height:1.4;margin:8px 0">Placement is a rough draft by default so the AI can tidy alignment. Lock to a grid only when you want a uniform snap.</p>
+      <div class="rect-grid">
+        <span>Width</span><span>Height</span>
+        <input id="canvas-w" type="number" min="64" aria-label="Canvas width">
+        <input id="canvas-h" type="number" min="64" aria-label="Canvas height">
+      </div>
+      <label class="check-row"><input id="grid-lock" type="checkbox"> Lock to grid</label>
+      <label for="grid-step">Grid step (canvas px)</label>
+      <input id="grid-step" type="number" min="0" step="any" value="20" aria-label="Grid step in pixels">
+      <div id="box-count"></div>
+    </details>
+
+    <details>
+      <summary>History</summary>
+      <p style="margin:8px 0"><button id="refresh-history" title="Reload journal entries from the exchange service">Refresh history</button></p>
+      <p id="history-empty" style="color:#8a8a80;margin:0">No journal entries yet.</p>
+      <ul id="history-list"></ul>
+    </details>
   </aside>
 </main>
 <div id="toast" role="status" aria-live="polite" aria-atomic="true"></div>
@@ -162,6 +224,26 @@
       y: h < 0 ? y + h : y,
       w: Math.abs(w),
       h: Math.abs(h)
+    };
+  }
+  function snapScalar(value, step) {
+    if (!Number.isFinite(step) || step <= 0) return value;
+    return Math.round(value / step) * step;
+  }
+  function snapPoint(point, step) {
+    return { x: snapScalar(point.x, step), y: snapScalar(point.y, step) };
+  }
+  function snapRect(rect, step) {
+    if (!Number.isFinite(step) || step <= 0) return { ...rect };
+    const x = snapScalar(rect.x, step);
+    const y = snapScalar(rect.y, step);
+    const right = snapScalar(rect.x + rect.w, step);
+    const bottom = snapScalar(rect.y + rect.h, step);
+    return {
+      x,
+      y,
+      w: Math.max(right - x, Number.EPSILON),
+      h: Math.max(bottom - y, Number.EPSILON)
     };
   }
   function clampPoint(point, canvas) {
@@ -241,7 +323,7 @@
       canvas: { w: canvas.w, h: canvas.h },
       grid: "0-1000"
     };
-    for (const key of ["description", "style", "background", "image"]) {
+    for (const key of ["description", "style", "background"]) {
       if (context[key]) payload[key] = context[key];
     }
     payload.boxes = [...boxes].sort((a, b) => (a.order ?? 0) - (b.order ?? 0)).map((box) => {
@@ -281,8 +363,13 @@
         to: moved && resized ? { x: bbox[0], y: bbox[1], w: bbox[2], h: bbox[3] } : moved ? { x: bbox[0], y: bbox[1] } : { w: bbox[2], h: bbox[3] }
       });
     }
-    if (box.note?.trim()) {
-      edits.push({ op: "annotate", target: targetOf(box), note: box.note.trim() });
+    const semanticIntent = [];
+    if (box.type === "text") {
+      semanticIntent.push(box.text?.length ? `Treat this element as text with the literal value ${JSON.stringify(box.text)}.` : "Treat this element as text.");
+    }
+    if (box.note?.trim()) semanticIntent.push(box.note.trim());
+    if (semanticIntent.length) {
+      edits.push({ op: "annotate", target: targetOf(box), note: semanticIntent.join(" ") });
     }
     return edits;
   }
@@ -296,6 +383,7 @@
           op: "add",
           label: box.label,
           desc: box.description ?? "",
+          type: box.type ?? "obj",
           bbox: toNormalized(box.rect, canvas)
         };
         if (box.type === "text" && box.text) entry.text = box.text;
@@ -478,6 +566,14 @@
         if (zoom2 < 0.1 || zoom2 > 4) fail("options.zoom", "must be between 0.1 and 4");
         project.options.zoom = zoom2;
       }
+      if (input.options.gridLock !== void 0) {
+        project.options.gridLock = boolean(input.options.gridLock, "options.gridLock");
+      }
+      if (input.options.gridStep !== void 0) {
+        const step = finite(input.options.gridStep, "options.gridStep");
+        if (step <= 0) fail("options.gridStep", "must be > 0");
+        project.options.gridStep = step;
+      }
     }
     return project;
   }
@@ -611,8 +707,8 @@
           order: i,
           label: binding.label || binding.kind,
           description: "",
-          type: "obj",
-          text: "",
+          type: saved?.type ?? "obj",
+          text: saved?.text ?? "",
           note: saved?.note ?? "",
           deleted: saved?.deleted ?? false,
           origin: "wireframe-bound",
@@ -681,8 +777,11 @@
       wireframe: null,
       // { version, sourceText, size } — SVG lives in the app layer
       interaction: { mode: "idle" },
-      lastClick: null
+      lastClick: null,
       // { point, ids } — completed-click overlap cycling
+      tool: "draw",
+      // draw | select
+      grid: { locked: false, step: 20 }
     };
     const undoStack = [];
     const redoStack = [];
@@ -715,6 +814,9 @@
     };
     const rectsEqual = (a, b) => a.x === b.x && a.y === b.y && a.w === b.w && a.h === b.h;
     const minFor = (box) => box?.origin === "wireframe-bound" ? { w: Math.min(MIN_SIZE, box.binding.rect.w), h: Math.min(MIN_SIZE, box.binding.rect.h) } : MIN_SIZE;
+    const gridStep = () => state2.grid.locked ? state2.grid.step : 0;
+    const fitPoint = (point) => snapPoint(clampPoint(point, state2.canvas), gridStep());
+    const fitRect = (rect, box) => clampRect(snapRect(rect, gridStep()), state2.canvas, minFor(box));
     const pointerDown = (point) => {
       lastPoint = point;
       if (!idle()) return;
@@ -740,8 +842,9 @@
       const it = state2.interaction;
       switch (it.mode) {
         case "pressing-empty":
+          if (state2.tool !== "draw") return;
           if (distance(it.start, point) > DRAG_THRESHOLD) {
-            state2.interaction = { mode: "drawing", start: it.start, preview: null };
+            state2.interaction = { mode: "drawing", start: fitPoint(it.start), preview: null };
             applyMove(point);
           }
           return;
@@ -763,7 +866,7 @@
           }
           return;
         case "drawing": {
-          const cp = clampPoint(point, state2.canvas);
+          const cp = fitPoint(point);
           it.preview = normalizeRect({ x: it.start.x, y: it.start.y, w: cp.x - it.start.x, h: cp.y - it.start.y });
           return;
         }
@@ -772,7 +875,7 @@
           if (!box) return;
           const dx = point.x - it.start.x;
           const dy = point.y - it.start.y;
-          box.rect = clampRect({ ...it.original, x: it.original.x + dx, y: it.original.y + dy }, state2.canvas, minFor(box));
+          box.rect = fitRect({ ...it.original, x: it.original.x + dx, y: it.original.y + dy }, box);
           return;
         }
         case "resizing": {
@@ -782,10 +885,11 @@
             it.snapshot = docSnapshot();
             it.original = { ...box.rect };
           }
+          const start = clampPoint(it.start, state2.canvas);
           const cp = clampPoint(point, state2.canvas);
-          const dx = cp.x - clampPoint(it.start, state2.canvas).x;
-          const dy = cp.y - clampPoint(it.start, state2.canvas).y;
-          box.rect = clampRect(normalizeRect(resizeRect(it.original, it.handle, dx, dy)), state2.canvas, minFor(box));
+          const dx = cp.x - start.x;
+          const dy = cp.y - start.y;
+          box.rect = fitRect(normalizeRect(resizeRect(it.original, it.handle, dx, dy)), box);
           return;
         }
         default:
@@ -911,10 +1015,78 @@
       redoStack.length = 0;
     };
     const pendingEdits = () => state2.mode === "iterate" ? hasPendingEdits(state2.boxes, state2.canvas) : false;
+    const reindex = () => {
+      state2.boxes.forEach((box, i) => {
+        box.order = i;
+      });
+    };
+    const moveBox = (id, delta) => {
+      if (!idle()) return false;
+      const box = state2.boxes.find((item) => item.id === id);
+      if (!box || box.origin === "wireframe-bound") return false;
+      const user = state2.boxes.map((item, index) => ({ item, index })).filter(({ item }) => item.origin !== "wireframe-bound");
+      const pos = user.findIndex(({ item }) => item.id === id);
+      const dest = pos + delta;
+      if (pos < 0 || dest < 0 || dest >= user.length) return false;
+      pushUndo(docSnapshot());
+      const from = user[pos].index;
+      const to = user[dest].index;
+      const [moved] = state2.boxes.splice(from, 1);
+      state2.boxes.splice(to, 0, moved);
+      reindex();
+      return true;
+    };
+    const setTool = (tool) => {
+      if (tool !== "draw" && tool !== "select" && tool !== "pan") return false;
+      state2.tool = tool;
+      return true;
+    };
+    const setGridLock = (locked) => {
+      state2.grid.locked = !!locked;
+      return true;
+    };
+    const setGridStep = (value) => {
+      const n = Number(value);
+      if (!Number.isFinite(n) || n <= 0) return false;
+      state2.grid.step = n;
+      return true;
+    };
+    const nudge = (dx, dy) => {
+      if (!idle()) return false;
+      const box = selectedBox();
+      if (!box) return false;
+      const unit = gridStep() || 1;
+      const next = fitRect({ ...box.rect, x: box.rect.x + dx * unit, y: box.rect.y + dy * unit }, box);
+      if (rectsEqual(next, box.rect)) return true;
+      pushUndo(docSnapshot());
+      box.rect = next;
+      return true;
+    };
+    const duplicateSelection = () => {
+      if (!idle()) return false;
+      const box = selectedBox();
+      if (!box || box.origin === "wireframe-bound") return false;
+      const offset = gridStep() || 16;
+      pushUndo(docSnapshot());
+      state2.counter += 1;
+      const copy = {
+        id: `b${state2.counter}`,
+        order: state2.boxes.length,
+        label: validLabel(`${box.label}-copy`) || `box-${state2.counter}`,
+        description: box.description,
+        type: box.type,
+        text: box.text,
+        rect: fitRect({ ...box.rect, x: box.rect.x + offset, y: box.rect.y + offset }, box)
+      };
+      state2.boxes.push(copy);
+      state2.selectedId = copy.id;
+      reindex();
+      return true;
+    };
     const setBoxField = (field, value) => {
       const box = selectedBox();
       if (!box) return false;
-      if (box.origin === "wireframe-bound" && (field === "label" || field === "type" || field === "text")) return false;
+      if (box.origin === "wireframe-bound" && field === "label") return false;
       if (field === "note") {
         if (box.origin !== "wireframe-bound") return false;
         const text = String(value);
@@ -948,7 +1120,7 @@
         if (!str) return false;
         const n = Number(str);
         if (!Number.isFinite(n)) return false;
-        const rect = clampRect({ ...box.rect, [field]: n }, state2.canvas, minFor(box));
+        const rect = fitRect({ ...box.rect, [field]: n }, box);
         if (rectsEqual(rect, box.rect)) return true;
         apply = () => {
           box.rect = rect;
@@ -1073,7 +1245,13 @@
       selectedBox,
       loadWireframe: loadWireframe2,
       clearWireframe,
-      pendingEdits
+      pendingEdits,
+      moveBox,
+      setTool,
+      setGridLock,
+      setGridStep,
+      nudge,
+      duplicateSelection
     };
   }
 
@@ -7191,6 +7369,12 @@
   var sourceVersion = 0;
   var backgroundSvg = null;
   var zoom = 1;
+  var pan = { x: 24, y: 24 };
+  var spaceHeld = false;
+  var altHeld = false;
+  var overlayHidden = false;
+  var viewPanning = null;
+  var listPendingOnly = false;
   var canvasEl = $("canvas");
   var backgroundEl = $("background");
   var spritesEl = $("sprites");
@@ -7251,8 +7435,12 @@
   var rectsDiffer = (a, b) => Math.round(a.x) !== Math.round(b.x) || Math.round(a.y) !== Math.round(b.y) || Math.round(a.w) !== Math.round(b.w) || Math.round(a.h) !== Math.round(b.h);
   var cleanProjectJson;
   var hasProjectFile = false;
-  var launcherConnected = true;
-  var projectSnapshot = () => editor.toProject({ zoom });
+  var serviceConnected = true;
+  var projectSnapshot = () => editor.toProject({
+    zoom,
+    gridLock: state.grid.locked,
+    gridStep: state.grid.step
+  });
   var projectFingerprint = () => JSON.stringify(projectSnapshot());
   var hasActiveDraft = () => {
     const active = document.activeElement;
@@ -7263,7 +7451,7 @@
     const dirty = isProjectDirty();
     projectUi.dirty.hidden = !dirty;
     projectUi.name.textContent = hasProjectFile ? "project.json" : "New project";
-    $("launcher-status").hidden = launcherConnected;
+    $("service-status").hidden = serviceConnected;
     $("project-status").title = dirty ? "Unsaved project changes - Save project writes ./boundbox/project.json" : hasProjectFile ? "Project is saved at ./boundbox/project.json" : "No project file saved yet";
   };
   var setProjectBaseline = (project, { exists = true } = {}) => {
@@ -7271,28 +7459,49 @@
     hasProjectFile = exists;
     updateProjectStatus();
   };
-  var applyZoom = () => {
-    canvasEl.style.transform = `scale(${zoom})`;
-    canvasEl.style.transformOrigin = "center center";
+  var workspaceEl = $("workspace");
+  var applyView = () => {
+    canvasEl.style.transformOrigin = "0 0";
+    canvasEl.style.transform = `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`;
     $("zoom-fit").textContent = `${Math.round(zoom * 100)}%`;
   };
   var setZoom = (z) => {
     zoom = Math.min(Math.max(z, 0.1), 4);
-    applyZoom();
+    applyView();
     updateProjectStatus();
   };
   var fitZoom = () => {
-    const ws = $("workspace").getBoundingClientRect();
-    setZoom(Math.min((ws.width - 56) / state.canvas.w, (ws.height - 56) / state.canvas.h, 1));
+    const ws = workspaceEl.getBoundingClientRect();
+    const next = Math.min((ws.width - 56) / state.canvas.w, (ws.height - 56) / state.canvas.h, 1);
+    zoom = Math.min(Math.max(next, 0.1), 4);
+    pan = {
+      x: (ws.width - state.canvas.w * zoom) / 2,
+      y: (ws.height - state.canvas.h * zoom) / 2
+    };
+    applyView();
+    updateProjectStatus();
+  };
+  var frameBox = (box) => {
+    const ws = workspaceEl.getBoundingClientRect();
+    pan = {
+      x: ws.width / 2 - (box.rect.x + box.rect.w / 2) * zoom,
+      y: ws.height / 2 - (box.rect.y + box.rect.h / 2) * zoom
+    };
+    applyView();
   };
   $("zoom-in").addEventListener("click", () => setZoom(zoom * 1.2));
   $("zoom-out").addEventListener("click", () => setZoom(zoom / 1.2));
   $("zoom-fit").addEventListener("click", fitZoom);
   var CURSORS = { nw: "nwse-resize", se: "nwse-resize", ne: "nesw-resize", sw: "nesw-resize", n: "ns-resize", s: "ns-resize", e: "ew-resize", w: "ew-resize" };
+  var boxPending = (box) => {
+    if (state.mode !== "iterate") return false;
+    return box.origin === "wireframe-bound" ? editsForBox(box, state.canvas).length > 0 : true;
+  };
   var boxClasses = (box, selected) => {
     let cls = "box-rect";
     if (box.origin === "wireframe-bound") cls += box.deleted ? " deleted" : " bound";
     else if (box.type === "text") cls += " type-text";
+    if (boxPending(box)) cls += " pending";
     if (selected) cls += " selected";
     return cls;
   };
@@ -7351,6 +7560,30 @@
     overlay.setAttribute("width", state.canvas.w);
     overlay.setAttribute("height", state.canvas.h);
     overlay.replaceChildren();
+    overlay.classList.toggle("overlay-hidden", overlayHidden || altHeld);
+    if (state.grid.locked && state.grid.step > 0 && state.canvas.w / state.grid.step <= 200 && state.canvas.h / state.grid.step <= 200) {
+      const step = state.grid.step;
+      for (let x = 0; x <= state.canvas.w; x += step) {
+        overlay.appendChild(svgEl("line", {
+          x1: x,
+          y1: 0,
+          x2: x,
+          y2: state.canvas.h,
+          stroke: "#d4d4cc",
+          "stroke-width": 0.5
+        }));
+      }
+      for (let y = 0; y <= state.canvas.h; y += step) {
+        overlay.appendChild(svgEl("line", {
+          x1: 0,
+          y1: y,
+          x2: state.canvas.w,
+          y2: y,
+          stroke: "#d4d4cc",
+          "stroke-width": 0.5
+        }));
+      }
+    }
     for (const box2 of state.boxes) {
       const g = svgEl("g", {});
       const { x, y, w, h } = box2.rect;
@@ -7367,6 +7600,9 @@
       const chipText = svgEl("text", { x: x + 7, y: chipY + 11, class: `box-chip${box2.deleted ? " deleted" : ""}` });
       chipText.textContent = box2.label;
       g.appendChild(chipText);
+      if (box2.note?.trim()) {
+        g.appendChild(svgEl("circle", { cx: x + chipW - 2, cy: chipY + 7.5, r: 3, class: "note-dot" }));
+      }
       if (selected) {
         g.appendChild(svgEl("rect", { x: x - 1, y: y - 1, width: w + 2, height: h + 2, class: "selection-outline" }));
         for (const hp of Object.values(handlePoints(box2.rect))) {
@@ -7389,6 +7625,16 @@
     $("save").disabled = recovering;
     $("copy-json").disabled = recovering;
     $("copy-json").title = recovering ? "Repair/reload the Wireloom source before exporting" : "";
+    $("tool-select").classList.toggle("active", state.tool === "select");
+    $("tool-draw").classList.toggle("active", state.tool === "draw");
+    $("tool-pan").classList.toggle("active", state.tool === "pan" || spaceHeld);
+    $("toggle-overlay").classList.toggle("active", overlayHidden || altHeld);
+    const pendingCount = state.mode === "iterate" ? editor.toPayload().edits.length : 0;
+    $("edit-count").hidden = pendingCount === 0;
+    $("edit-count").textContent = `${pendingCount} edit${pendingCount === 1 ? "" : "s"}`;
+    $("pending-filter-wrap").hidden = state.mode !== "iterate";
+    syncInput($("grid-step"), state.grid.step);
+    $("grid-lock").checked = state.grid.locked;
     const box = editor.selectedBox();
     props.wrap.hidden = !box;
     props.empty.hidden = !!box;
@@ -7399,7 +7645,7 @@
         props.boundInfo.textContent = `Wireframe ${box.binding.kind} \u2014 source line ${box.binding.line}${box.deleted ? " \u2014 MARKED DELETED" : ""}`;
       }
       props.label.disabled = bound;
-      props.type.disabled = bound;
+      props.type.disabled = false;
       props.descWrap.hidden = bound;
       props.noteWrap.hidden = !bound;
       props.deleteBtn.textContent = bound ? box.deleted ? "Restore" : "Mark deleted" : "Delete box";
@@ -7407,7 +7653,7 @@
       if (!bound) syncInput(props.desc, box.description);
       else syncInput(props.note, box.note ?? "");
       syncInput(props.type, box.type);
-      props.textWrap.hidden = bound || box.type !== "text";
+      props.textWrap.hidden = box.type !== "text";
       syncInput(props.text, box.text);
       syncInput(props.x, Math.round(box.rect.x));
       syncInput(props.y, Math.round(box.rect.y));
@@ -7425,15 +7671,66 @@
     canvasInputs.h.disabled = state.mode === "iterate";
     const counts = state.mode === "iterate" ? `${state.boxes.length} elements \u2014 ${editor.toPayload().edits.length} pending edit(s)` : `${state.boxes.length} box${state.boxes.length === 1 ? "" : "es"}`;
     $("box-count").textContent = `${counts} \u2014 ${state.canvas.w} \xD7 ${state.canvas.h} canvas`;
+    renderBoxList();
     updateProjectStatus();
   }
+  var boxListEl = $("box-list");
+  var boxListEmpty = $("box-list-empty");
+  function renderBoxList() {
+    const ordered = [...state.boxes].sort((a, b) => (a.order ?? 0) - (b.order ?? 0)).filter((box) => !listPendingOnly || boxPending(box));
+    boxListEmpty.hidden = ordered.length > 0;
+    boxListEl.replaceChildren();
+    const userIds = ordered.filter((box) => box.origin !== "wireframe-bound").map((box) => box.id);
+    ordered.forEach((box) => {
+      const item = document.createElement("li");
+      const select = document.createElement("button");
+      select.type = "button";
+      select.className = `box-list-label${box.id === state.selectedId ? " selected" : ""}`;
+      const mark = boxPending(box) ? " \u2022" : "";
+      select.textContent = `${box.deleted ? `${box.label} (deleted)` : box.label}${mark}`;
+      select.title = box.origin === "wireframe-bound" ? `${box.binding.kind} line ${box.binding.line}` : box.description || box.label;
+      select.addEventListener("click", () => {
+        editor.state.selectedId = box.id;
+        frameBox(box);
+        render();
+      });
+      item.append(select);
+      if (box.origin !== "wireframe-bound") {
+        const userIndex = userIds.indexOf(box.id);
+        const up = document.createElement("button");
+        up.type = "button";
+        up.textContent = "\u2191";
+        up.title = "Move earlier in export order";
+        up.disabled = userIndex === 0;
+        up.addEventListener("click", () => {
+          editor.moveBox(box.id, -1);
+          render();
+        });
+        const down = document.createElement("button");
+        down.type = "button";
+        down.textContent = "\u2193";
+        down.title = "Move later in export order";
+        down.disabled = userIndex === userIds.length - 1;
+        down.addEventListener("click", () => {
+          editor.moveBox(box.id, 1);
+          render();
+        });
+        item.append(up, down);
+      }
+      boxListEl.appendChild(item);
+    });
+  }
   function updateCursor(point) {
+    if (viewPanning || spaceHeld || state.tool === "pan") {
+      overlay.style.cursor = "grab";
+      return;
+    }
     if (state.interaction.mode !== "idle") return;
     const selected = editor.selectedBox();
     const handle = selected ? handleAt(point, selected.rect) : null;
     if (handle) overlay.style.cursor = CURSORS[handle];
     else if (boxesAt(state.boxes, point).length) overlay.style.cursor = "move";
-    else overlay.style.cursor = "crosshair";
+    else overlay.style.cursor = state.tool === "select" ? "default" : "crosshair";
   }
   var showError = (message) => {
     banner.text.textContent = message;
@@ -7473,19 +7770,20 @@
     toast(`${wasRecovering ? "Recovered" : "Wireframe loaded"} (v${sourceVersion}) \u2014 ${wf.bindings.length} elements bound.`);
     return true;
   };
-  var fetchSource = async ({ confirmFlush } = {}) => {
+  var fetchSource = async ({ confirmFlush, silentMissing = false } = {}) => {
     if (confirmFlush && editor.pendingEdits() && !window.confirm("Reloading flushes your pending edits (they apply to the previous wireframe version). Continue?")) {
-      return;
+      return false;
     }
     try {
       const res = await fetch("source");
       if (res.status === 404) {
-        toast("No source.wireloom in the exchange folder yet \u2014 ask the AI to write one.");
-        return;
+        if (!silentMissing) toast("No source.wireloom in the exchange folder yet \u2014 ask the AI to write one.");
+        return false;
       }
-      applySource(await res.text());
+      return applySource(await res.text());
     } catch {
-      toast("Could not reach the launcher to read source.wireloom.");
+      if (!silentMissing) toast("Could not reach the exchange service to read source.wireloom.");
+      return false;
     }
   };
   $("load-source").addEventListener("click", () => fetchSource({ confirmFlush: false }));
@@ -7516,11 +7814,21 @@
     if (isTyping()) document.activeElement.blur();
     activePointer = event.pointerId;
     overlay.setPointerCapture(event.pointerId);
+    if (spaceHeld || state.tool === "pan") {
+      viewPanning = { x: event.clientX - pan.x, y: event.clientY - pan.y };
+      overlay.style.cursor = "grabbing";
+      return;
+    }
     editor.pointerDown(canvasPoint(event));
     render();
   });
   overlay.addEventListener("pointermove", (event) => {
     if (activePointer !== null && event.pointerId !== activePointer) return;
+    if (viewPanning) {
+      pan = { x: event.clientX - viewPanning.x, y: event.clientY - viewPanning.y };
+      applyView();
+      return;
+    }
     const point = canvasPoint(event);
     editor.pointerMove(point);
     updateCursor(point);
@@ -7529,20 +7837,50 @@
   var finishPointer = (event) => {
     if (event.pointerId !== activePointer) return;
     activePointer = null;
+    if (viewPanning) {
+      viewPanning = null;
+      updateCursor(canvasPoint(event));
+      return;
+    }
     if (state.interaction.mode === "idle") return;
     const effect = editor.pointerUp(canvasPoint(event));
     render();
-    if (effect === "focus-description") (state.mode === "iterate" ? props.desc : props.desc).focus();
+    if (effect === "focus-description") props.desc.focus();
   };
   overlay.addEventListener("pointerup", finishPointer);
   overlay.addEventListener("pointercancel", finishPointer);
   window.addEventListener("blur", () => {
     activePointer = null;
+    viewPanning = null;
+    spaceHeld = false;
+    altHeld = false;
     if (state.interaction.mode !== "idle") {
       editor.pointerUp();
       render();
     }
   });
+  workspaceEl.addEventListener("wheel", (event) => {
+    event.preventDefault();
+    if (event.ctrlKey || event.metaKey) {
+      const factor = event.deltaY < 0 ? 1.08 : 1 / 1.08;
+      const next = Math.min(Math.max(zoom * factor, 0.1), 4);
+      const bounds = overlay.getBoundingClientRect();
+      const cx = event.clientX - bounds.left;
+      const cy = event.clientY - bounds.top;
+      const canvasX = cx / zoom;
+      const canvasY = cy / zoom;
+      zoom = next;
+      pan = {
+        x: event.clientX - workspaceEl.getBoundingClientRect().left - canvasX * zoom,
+        y: event.clientY - workspaceEl.getBoundingClientRect().top - canvasY * zoom
+      };
+      applyView();
+      updateProjectStatus();
+      return;
+    }
+    pan = { x: pan.x - event.deltaX, y: pan.y - event.deltaY };
+    applyView();
+  }, { passive: false });
   var cancelingEdit = false;
   var cancelFieldEdit = (el) => {
     cancelingEdit = true;
@@ -7567,7 +7905,50 @@
       saveProject();
       return;
     }
+    if (event.key === " " && !isTyping()) {
+      event.preventDefault();
+      if (!spaceHeld) {
+        spaceHeld = true;
+        render();
+      }
+      return;
+    }
+    if (event.key === "Alt" && !isTyping()) {
+      altHeld = true;
+      render();
+      return;
+    }
     if (isTyping()) return;
+    if (event.key.toLowerCase() === "v") {
+      editor.setTool("select");
+      render();
+      return;
+    }
+    if (event.key.toLowerCase() === "r") {
+      editor.setTool("draw");
+      render();
+      return;
+    }
+    if (event.key.toLowerCase() === "h") {
+      overlayHidden = !overlayHidden;
+      render();
+      return;
+    }
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "d") {
+      event.preventDefault();
+      editor.duplicateSelection();
+      render();
+      return;
+    }
+    if (event.key === "ArrowLeft" || event.key === "ArrowRight" || event.key === "ArrowUp" || event.key === "ArrowDown") {
+      event.preventDefault();
+      const amount = event.shiftKey ? 10 : 1;
+      const dx = event.key === "ArrowLeft" ? -amount : event.key === "ArrowRight" ? amount : 0;
+      const dy = event.key === "ArrowUp" ? -amount : event.key === "ArrowDown" ? amount : 0;
+      editor.nudge(dx, dy);
+      render();
+      return;
+    }
     if (event.key === "Delete" || event.key === "Backspace") {
       editor.deleteSelection();
       render();
@@ -7578,6 +7959,16 @@
     } else if ((event.ctrlKey || event.metaKey) && (event.key.toLowerCase() === "y" || event.key.toLowerCase() === "z" && event.shiftKey)) {
       event.preventDefault();
       editor.redo();
+      render();
+    }
+  });
+  window.addEventListener("keyup", (event) => {
+    if (event.key === " ") {
+      spaceHeld = false;
+      render();
+    }
+    if (event.key === "Alt") {
+      altHeld = false;
       render();
     }
   });
@@ -7647,6 +8038,35 @@
   };
   bindCanvasInput(canvasInputs.w);
   bindCanvasInput(canvasInputs.h);
+  $("grid-lock").addEventListener("change", () => {
+    editor.setGridLock($("grid-lock").checked);
+    render();
+  });
+  $("grid-step").addEventListener("change", () => {
+    if (!editor.setGridStep($("grid-step").value)) toast("Grid step must be a number greater than 0.");
+    render();
+  });
+  $("grid-step").addEventListener("input", updateProjectStatus);
+  $("pending-only").addEventListener("change", () => {
+    listPendingOnly = $("pending-only").checked;
+    render();
+  });
+  $("tool-select").addEventListener("click", () => {
+    editor.setTool("select");
+    render();
+  });
+  $("tool-draw").addEventListener("click", () => {
+    editor.setTool("draw");
+    render();
+  });
+  $("tool-pan").addEventListener("click", () => {
+    editor.setTool("pan");
+    render();
+  });
+  $("toggle-overlay").addEventListener("click", () => {
+    overlayHidden = !overlayHidden;
+    render();
+  });
   var targetSummary = (warning) => {
     const { target } = warning;
     return `line ${target.line} ${target.kind} "${target.label}"`;
@@ -7707,10 +8127,12 @@
         backgroundEl.replaceChildren();
         backgroundSvg = null;
       }
+      if (restored.options.gridLock !== void 0) editor.setGridLock(restored.options.gridLock);
+      if (restored.options.gridStep !== void 0) editor.setGridStep(restored.options.gridStep);
       let baselineProject = project;
       if (restored.options.zoom !== void 0) {
         zoom = restored.options.zoom;
-        applyZoom();
+        applyView();
       } else {
         fitZoom();
         baselineProject = { ...project, options: { ...project.options, zoom } };
@@ -7730,7 +8152,7 @@
       }
       return true;
     } catch {
-      toast("Open project failed: the launcher is not reachable.");
+      toast("Open project failed: the exchange service is not reachable.");
       return false;
     } finally {
       setProjectBusy(false);
@@ -7756,9 +8178,10 @@
       hasProjectFile = true;
       updateProjectStatus();
       toast("Saved project.json - this session can now be reopened later.");
+      refreshHistory({ silent: true });
       return true;
     } catch {
-      toast("Project save failed: the launcher is not reachable.");
+      toast("Project save failed: the exchange service is not reachable.");
       return false;
     } finally {
       setProjectBusy(false);
@@ -7771,6 +8194,70 @@
     event.preventDefault();
     event.returnValue = "";
   });
+  var historyListEl = $("history-list");
+  var historyEmpty = $("history-empty");
+  var historyEntries = [];
+  var renderHistory = (entries) => {
+    historyEntries = entries;
+    historyEmpty.hidden = entries.length > 0;
+    historyListEl.replaceChildren();
+    [...entries].reverse().forEach((entry) => {
+      const item = document.createElement("li");
+      const meta = document.createElement("div");
+      meta.className = "history-meta";
+      const title = document.createElement("strong");
+      title.textContent = `#${entry.seq} ${entry.file}`;
+      meta.append(title, document.createElement("br"), document.createTextNode(`${entry.reason || ""} \xB7 ${entry.bytes} bytes`));
+      const restoreBtn = document.createElement("button");
+      restoreBtn.type = "button";
+      restoreBtn.textContent = "Restore";
+      restoreBtn.title = `Restore ${entry.file} from seq ${entry.seq}`;
+      restoreBtn.addEventListener("click", () => restoreHistoryEntry(entry));
+      item.append(meta, restoreBtn);
+      historyListEl.appendChild(item);
+    });
+  };
+  var refreshHistory = async ({ silent = false } = {}) => {
+    try {
+      const res = await fetch("history", { cache: "no-store" });
+      if (!res.ok) throw new Error(`history failed (${res.status})`);
+      const body = await res.json();
+      renderHistory(Array.isArray(body.entries) ? body.entries : []);
+      if (!silent) toast(`History: ${historyEntries.length} journal ${historyEntries.length === 1 ? "entry" : "entries"}.`);
+    } catch {
+      if (!silent) toast("Could not read history from the exchange service.");
+    }
+  };
+  var restoreHistoryEntry = async (entry) => {
+    if (!window.confirm(`Restore ${entry.file} from seq ${entry.seq}? Unjournaled live content is preserved first.`)) return;
+    try {
+      const res = await fetch("restore", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ seq: entry.seq })
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast(`Restore failed (${res.status}): ${body.error ?? "unknown error"}.`);
+        return;
+      }
+      await refreshHistory({ silent: true });
+      if (entry.file === "project.json") {
+        toast(`Restored project.json (seq ${entry.seq}). Opening it.`);
+        await openProject();
+        return;
+      }
+      if (entry.file === "source.wireloom") {
+        const loaded = await fetchSource({ confirmFlush: true, silentMissing: true });
+        toast(loaded ? `Restored source.wireloom (seq ${entry.seq}) and loaded it.` : `Restored source.wireloom (seq ${entry.seq}).`);
+        return;
+      }
+      toast(`Restored ${entry.file} (seq ${entry.seq}) in the exchange folder.`);
+    } catch {
+      toast("Restore failed: the exchange service is not reachable.");
+    }
+  };
+  $("refresh-history").addEventListener("click", () => refreshHistory());
   var heartbeatTimer;
   var heartbeatInFlight = false;
   var heartbeat = async () => {
@@ -7786,14 +8273,14 @@
       if (Number.isFinite(timeoutMs) && timeoutMs > 0) {
         nextDelay = Math.max(250, Math.min(6e4, Math.floor(timeoutMs / 3)));
       }
-      if (!launcherConnected) {
-        launcherConnected = true;
+      if (!serviceConnected) {
+        serviceConnected = true;
         updateProjectStatus();
         toast("Launcher reconnected.");
       }
     } catch {
-      if (launcherConnected) {
-        launcherConnected = false;
+      if (serviceConnected) {
+        serviceConnected = false;
         updateProjectStatus();
         toast("Launcher disconnected - Refresh or relaunch BoundBox if it does not recover.");
       }
@@ -7806,6 +8293,7 @@
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "visible") heartbeat();
   });
+  refreshHistory({ silent: true });
   $("save").addEventListener("click", async () => {
     const kind = state.mode === "iterate" ? "packet" : "boxes";
     const payload = editor.toPayload();
@@ -7816,10 +8304,12 @@
         body: JSON.stringify({ kind, payload })
       });
       const body = await res.json().catch(() => ({}));
-      if (res.ok) toast(`Saved ${kind}.json to the exchange folder \u2014 the AI can read it now.`);
-      else toast(`Save failed (${res.status}): ${body.error ?? "unknown error"} \u2014 try Copy JSON instead.`);
+      if (res.ok) {
+        toast(`Saved ${kind}.json to the exchange folder \u2014 the AI can read it now.`);
+        refreshHistory({ silent: true });
+      } else toast(`Save failed (${res.status}): ${body.error ?? "unknown error"} \u2014 try Copy JSON instead.`);
     } catch {
-      toast("Save failed: the launcher is not reachable \u2014 use Copy JSON instead.");
+      toast("Save failed: the exchange service is not reachable \u2014 use Copy JSON instead.");
     }
   });
   $("copy-json").addEventListener("click", async () => {
@@ -7839,11 +8329,18 @@
     fitZoom,
     openProject,
     saveProject,
-    isProjectDirty
+    isProjectDirty,
+    refreshHistory,
+    restoreHistoryEntry
   };
   setProjectBaseline(projectSnapshot(), { exists: false });
   render();
-  openProject({ silentMissing: true });
+  fitZoom();
+  var bootWorkspace = async () => {
+    const opened = await openProject({ silentMissing: true });
+    if (!opened) await fetchSource({ confirmFlush: false, silentMissing: true });
+  };
+  bootWorkspace();
 })();
 
 </script>

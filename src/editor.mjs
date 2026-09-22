@@ -18,6 +18,7 @@
 import {
   MIN_SIZE, DRAG_THRESHOLD, CLICK_TOLERANCE,
   normalizeRect, clampRect, clampPoint, boxesAt, handleAt, resizeRect, distance,
+  snapPoint, snapRect,
 } from './geometry.mjs';
 import { buildSketchPayload } from './export.mjs';
 import { buildIteratePayload, hasPendingEdits } from './packet.mjs';
@@ -39,6 +40,8 @@ export function createEditor({ canvas = { w: 1024, h: 768 } } = {}) {
     wireframe: null, // { version, sourceText, size } — SVG lives in the app layer
     interaction: { mode: 'idle' },
     lastClick: null, // { point, ids } — completed-click overlap cycling
+    tool: 'draw', // draw | select
+    grid: { locked: false, step: 20 },
   };
   const undoStack = [];
   const redoStack = [];
@@ -80,6 +83,9 @@ export function createEditor({ canvas = { w: 1024, h: 768 } } = {}) {
   const minFor = (box) => (box?.origin === 'wireframe-bound'
     ? { w: Math.min(MIN_SIZE, box.binding.rect.w), h: Math.min(MIN_SIZE, box.binding.rect.h) }
     : MIN_SIZE);
+  const gridStep = () => (state.grid.locked ? state.grid.step : 0);
+  const fitPoint = (point) => snapPoint(clampPoint(point, state.canvas), gridStep());
+  const fitRect = (rect, box) => clampRect(snapRect(rect, gridStep()), state.canvas, minFor(box));
 
   // --- pointer state machine --------------------------------------------------
   const pointerDown = (point) => {
@@ -114,8 +120,9 @@ export function createEditor({ canvas = { w: 1024, h: 768 } } = {}) {
     const it = state.interaction;
     switch (it.mode) {
       case 'pressing-empty':
+        if (state.tool !== 'draw') return;
         if (distance(it.start, point) > DRAG_THRESHOLD) {
-          state.interaction = { mode: 'drawing', start: it.start, preview: null };
+          state.interaction = { mode: 'drawing', start: fitPoint(it.start), preview: null };
           applyMove(point);
         }
         return;
@@ -133,7 +140,7 @@ export function createEditor({ canvas = { w: 1024, h: 768 } } = {}) {
         }
         return;
       case 'drawing': {
-        const cp = clampPoint(point, state.canvas);
+        const cp = fitPoint(point);
         it.preview = normalizeRect({ x: it.start.x, y: it.start.y, w: cp.x - it.start.x, h: cp.y - it.start.y });
         return;
       }
@@ -142,7 +149,7 @@ export function createEditor({ canvas = { w: 1024, h: 768 } } = {}) {
         if (!box) return;
         const dx = point.x - it.start.x;
         const dy = point.y - it.start.y;
-        box.rect = clampRect({ ...it.original, x: it.original.x + dx, y: it.original.y + dy }, state.canvas, minFor(box));
+        box.rect = fitRect({ ...it.original, x: it.original.x + dx, y: it.original.y + dy }, box);
         return;
       }
       case 'resizing': {
@@ -152,10 +159,11 @@ export function createEditor({ canvas = { w: 1024, h: 768 } } = {}) {
           it.snapshot = docSnapshot();
           it.original = { ...box.rect };
         }
+        const start = clampPoint(it.start, state.canvas);
         const cp = clampPoint(point, state.canvas);
-        const dx = cp.x - clampPoint(it.start, state.canvas).x;
-        const dy = cp.y - clampPoint(it.start, state.canvas).y;
-        box.rect = clampRect(normalizeRect(resizeRect(it.original, it.handle, dx, dy)), state.canvas, minFor(box));
+        const dx = cp.x - start.x;
+        const dy = cp.y - start.y;
+        box.rect = fitRect(normalizeRect(resizeRect(it.original, it.handle, dx, dy)), box);
         return;
       }
       default:
@@ -306,14 +314,90 @@ export function createEditor({ canvas = { w: 1024, h: 768 } } = {}) {
 
   const pendingEdits = () => (state.mode === 'iterate' ? hasPendingEdits(state.boxes, state.canvas) : false);
 
+  const reindex = () => {
+    state.boxes.forEach((box, i) => { box.order = i; });
+  };
+
+  /** Move a user-drawn box in export/list order. Bound boxes stay source-ordered. */
+  const moveBox = (id, delta) => {
+    if (!idle()) return false;
+    const box = state.boxes.find((item) => item.id === id);
+    if (!box || box.origin === 'wireframe-bound') return false;
+    const user = state.boxes
+      .map((item, index) => ({ item, index }))
+      .filter(({ item }) => item.origin !== 'wireframe-bound');
+    const pos = user.findIndex(({ item }) => item.id === id);
+    const dest = pos + delta;
+    if (pos < 0 || dest < 0 || dest >= user.length) return false;
+    pushUndo(docSnapshot());
+    const from = user[pos].index;
+    const to = user[dest].index;
+    const [moved] = state.boxes.splice(from, 1);
+    state.boxes.splice(to, 0, moved);
+    reindex();
+    return true;
+  };
+
+  const setTool = (tool) => {
+    if (tool !== 'draw' && tool !== 'select' && tool !== 'pan') return false;
+    state.tool = tool;
+    return true;
+  };
+
+  const setGridLock = (locked) => {
+    state.grid.locked = !!locked;
+    return true;
+  };
+
+  const setGridStep = (value) => {
+    const n = Number(value);
+    if (!Number.isFinite(n) || n <= 0) return false;
+    state.grid.step = n;
+    return true;
+  };
+
+  const nudge = (dx, dy) => {
+    if (!idle()) return false;
+    const box = selectedBox();
+    if (!box) return false;
+    const unit = gridStep() || 1;
+    const next = fitRect({ ...box.rect, x: box.rect.x + dx * unit, y: box.rect.y + dy * unit }, box);
+    if (rectsEqual(next, box.rect)) return true;
+    pushUndo(docSnapshot());
+    box.rect = next;
+    return true;
+  };
+
+  const duplicateSelection = () => {
+    if (!idle()) return false;
+    const box = selectedBox();
+    if (!box || box.origin === 'wireframe-bound') return false;
+    const offset = gridStep() || 16;
+    pushUndo(docSnapshot());
+    state.counter += 1;
+    const copy = {
+      id: `b${state.counter}`,
+      order: state.boxes.length,
+      label: validLabel(`${box.label}-copy`) || `box-${state.counter}`,
+      description: box.description,
+      type: box.type,
+      text: box.text,
+      rect: fitRect({ ...box.rect, x: box.rect.x + offset, y: box.rect.y + offset }, box),
+    };
+    state.boxes.push(copy);
+    state.selectedId = copy.id;
+    reindex();
+    return true;
+  };
+
   const setBoxField = (field, value) => {
     const box = selectedBox();
     if (!box) return false;
 
-    // Bound boxes: label/type are read-only derivations of the wireframe
-    // element (edit intent goes through the note/annotate path); geometry and
-    // note stay editable.
-    if (box.origin === 'wireframe-bound' && (field === 'label' || field === 'type' || field === 'text')) return false;
+    // A bound label remains a read-only derivation of the Wireloom element.
+    // Type and literal text are editable semantic intent; the packet builder
+    // translates them into an annotate edit for the AI.
+    if (box.origin === 'wireframe-bound' && field === 'label') return false;
     if (field === 'note') {
       if (box.origin !== 'wireframe-bound') return false;
       const text = String(value);
@@ -343,7 +427,7 @@ export function createEditor({ canvas = { w: 1024, h: 768 } } = {}) {
       if (!str) return false; // Number('') === 0 trap (review fix)
       const n = Number(str);
       if (!Number.isFinite(n)) return false; // reject non-numeric, keep last valid
-      const rect = clampRect({ ...box.rect, [field]: n }, state.canvas, minFor(box));
+      const rect = fitRect({ ...box.rect, [field]: n }, box);
       if (rectsEqual(rect, box.rect)) return true;
       apply = () => { box.rect = rect; };
     } else {
@@ -484,5 +568,11 @@ export function createEditor({ canvas = { w: 1024, h: 768 } } = {}) {
     loadWireframe,
     clearWireframe,
     pendingEdits,
+    moveBox,
+    setTool,
+    setGridLock,
+    setGridStep,
+    nudge,
+    duplicateSelection,
   };
 }

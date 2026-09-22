@@ -60,10 +60,12 @@ window "Product landing page":
 Start from `wireframe_source` in the packet. Apply edits in array order:
 
 - `delete`: remove the targeted node/subtree.
-- `annotate`: implement the requested semantic change in `note`.
+- `annotate`: implement the requested semantic change in `note`. BoundBox may
+  generate this note from the Type/Literal text controls as well as from the
+  free-form requested-change field.
 - `move`: restructure rows/columns/order/spacing so the target approaches the normalized `to.x`/`to.y`; when `w`/`h` are also present, resize it too.
 - `resize`: adjust width, height, container allocation, or element options to approach `to.w`/`to.h`.
-- `add`: insert a suitable Wireloom element near `bbox`, using `label`, `desc`, and optional literal `text`.
+- `add`: insert a suitable Wireloom element near `bbox`, using `label`, `desc`, `type` (`obj` or `text`), and optional literal `text`.
 
 Targets use source `line`, element `kind`, and `label`. Match against the packet's included source, not a different local revision. Preserve unaffected content and intent, but rewrite the entire source file rather than patching line numbers in place.
 
@@ -83,5 +85,5 @@ If an old saved project enters **Recovery** mode, repair `source.wireloom` and h
 
 - Write only the fixed exchange filenames; never invent a path from payload content.
 - Do not edit `history/` or `journal.jsonl` manually.
-- Use the bundled `history.mjs` commands from SKILL.md before restoring an earlier exchange file.
+- Use the bundled `history.py` commands from SKILL.md before restoring an earlier exchange file.
 - Never overwrite `project.json` as an AI response; the app owns it.

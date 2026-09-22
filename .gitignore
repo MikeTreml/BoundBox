@@ -1,7 +1,7 @@
-# Dependencies (see note in the PR: node_modules is currently tracked from an
-# earlier commit; untrack with `git rm -r --cached node_modules` to make this
-# rule take effect for the existing files).
+# Installed by npm. If git still lists files here, untrack them with
+# `git rm -r --cached node_modules`.
 node_modules/
+.venv/
 
 # Exchange folder: session state, snapshots, and AI/user payloads.
 # The launcher also writes its own `*` .gitignore inside this directory.

@@ -305,4 +305,47 @@ describe('editor pointer state machine', () => {
     expect(payload.description).toBe('landing page for BoundBox');
     expect(payload.boxes[0]).toMatchObject({ label: 'hero', desc: 'Hero banner image', bbox: [39, 156, 859, 417] });
   });
+
+  it('moveBox reorders export order and is undoable', () => {
+    const ed = createEditor();
+    draw(ed, { x: 10, y: 10 }, { x: 80, y: 80 });
+    draw(ed, { x: 90, y: 90 }, { x: 160, y: 160 });
+    ed.state.selectedId = ed.state.boxes[0].id;
+    ed.setBoxField('label', 'first');
+    ed.state.selectedId = ed.state.boxes[1].id;
+    ed.setBoxField('label', 'second');
+    expect(ed.moveBox(ed.state.boxes[1].id, -1)).toBe(true);
+    expect(ed.toPayload().boxes.map((box) => box.label)).toEqual(['second', 'first']);
+    ed.undo();
+    expect(ed.toPayload().boxes.map((box) => box.label)).toEqual(['first', 'second']);
+    expect(ed.moveBox(ed.state.boxes[0].id, -1)).toBe(false);
+  });
+
+  it('select tool does not draw; grid lock snaps to a settable step', () => {
+    const ed = createEditor();
+    ed.setTool('select');
+    draw(ed, { x: 10, y: 10 }, { x: 80, y: 80 });
+    expect(ed.state.boxes).toHaveLength(0);
+
+    ed.setTool('draw');
+    expect(ed.setGridStep(0)).toBe(false);
+    expect(ed.setGridStep(50)).toBe(true);
+    ed.setGridLock(true);
+    draw(ed, { x: 12, y: 12 }, { x: 80, y: 90 });
+    const box = ed.state.boxes[0];
+    expect(box.rect.x % 50).toBe(0);
+    expect(box.rect.y % 50).toBe(0);
+    expect(box.rect.w % 50).toBe(0);
+    expect(box.rect.h % 50).toBe(0);
+  });
+
+  it('nudge and duplicate work; duplicate refuses bound boxes', () => {
+    const ed = createEditor();
+    draw(ed, { x: 100, y: 100 }, { x: 200, y: 200 });
+    expect(ed.nudge(1, 0)).toBe(true);
+    expect(ed.state.boxes[0].rect.x).toBe(101);
+    expect(ed.duplicateSelection()).toBe(true);
+    expect(ed.state.boxes).toHaveLength(2);
+    expect(ed.state.boxes[1].rect).toEqual({ x: 117, y: 116, w: 100, h: 100 });
+  });
 });

@@ -1,7 +1,7 @@
 /**
  * Build and install the BoundBox skill without deleting unrelated target files.
  *
- * Defaults to both ~/.claude/skills/boundbox and ~/.codex/skills/boundbox.
+ * Defaults to ~/.claude/skills/boundbox, ~/.cursor/skills/boundbox, and ~/.codex/skills/boundbox.
  * Use one or more --target paths to install somewhere else.
  * Use --skip-build only when skill/ has already been built and verified.
  */
@@ -13,7 +13,7 @@ import { fileURLToPath } from 'node:url';
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, '..');
 const bundleDir = join(root, 'skill');
-const files = ['SKILL.md', 'PROMPTS.md', 'SCHEMA.md', 'launch.mjs', 'history.mjs', 'boundbox.html'];
+const files = ['SKILL.md', 'PROMPTS.md', 'SCHEMA.md', 'launch.py', 'app.py', 'history.py', 'runtime.py', 'requirements.txt', 'boundbox.html'];
 
 const args = process.argv.slice(2);
 const targets = [];
@@ -33,6 +33,7 @@ for (let i = 0; i < args.length; i += 1) {
 if (!targets.length) {
   targets.push(
     join(homedir(), '.claude', 'skills', 'boundbox'),
+    join(homedir(), '.cursor', 'skills', 'boundbox'),
     join(process.env.CODEX_HOME || join(homedir(), '.codex'), 'skills', 'boundbox'),
   );
 }
