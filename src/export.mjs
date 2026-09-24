@@ -26,7 +26,7 @@ export function buildSketchPayload(boxes, canvas, context = {}) {
     canvas: { w: canvas.w, h: canvas.h },
     grid: '0-1000',
   };
-  for (const key of ['description', 'style', 'background', 'image']) {
+  for (const key of ['description', 'style', 'background']) {
     if (context[key]) payload[key] = context[key];
   }
   payload.boxes = [...boxes]

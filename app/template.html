@@ -3,21 +3,30 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:,">
 <title>BoundBox</title>
 <style>
   * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
   body { font-family: system-ui, -apple-system, sans-serif; margin: 0; height: 100vh; display: flex; flex-direction: column; background: #ecece6; color: #1d1d1f; overflow: hidden; }
-  header { display: flex; align-items: center; gap: 12px; padding: 8px 14px; background: #fff; border-bottom: 1px solid #d9d9d2; flex: 0 0 auto; }
+  header { display: flex; align-items: center; gap: 10px; padding: 8px 14px; background: #fff; border-bottom: 1px solid #d9d9d2; flex: 0 0 auto; flex-wrap: wrap; }
   header h1 { font-size: 15px; font-weight: 650; margin: 0; letter-spacing: -0.01em; }
   .badge { font-size: 11px; padding: 2px 8px; border-radius: 999px; background: #eef2ff; color: #3b4bd8; font-weight: 600; }
+  .project-status { display: inline-flex; align-items: center; gap: 5px; color: #6e6e66; font-size: 11px; white-space: nowrap; }
+  #dirty-dot { color: #b45309; font-size: 15px; line-height: 0; }
   .spacer { flex: 1; }
+  .tool-group, .zoom-group { display: inline-flex; gap: 2px; }
+  .tool-group button, .zoom-group button { padding: 5px 8px; min-width: 34px; }
+  .tool-group button.active, #toggle-overlay.active { background: #1d1d1f; color: #fff; border-color: #1d1d1f; }
+  .header-cluster { display: inline-flex; align-items: center; gap: 6px; }
+  .header-cluster > span { font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: #8a8a80; }
   button { font: inherit; font-size: 13px; padding: 5px 12px; border: 1px solid #c9c9c1; border-radius: 7px; background: #fff; cursor: pointer; }
   button:hover { border-color: #8a8a80; }
   button.primary { background: #1d1d1f; color: #fff; border-color: #1d1d1f; }
   button.danger { color: #b3261e; border-color: #e2b6b3; }
   main { flex: 1; display: flex; min-height: 0; }
-  #workspace { flex: 1; overflow: auto; display: grid; place-items: center; padding: 24px; }
-  #canvas { position: relative; background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,.14), 0 8px 28px rgba(0,0,0,.08); }
+  #workspace { flex: 1; overflow: hidden; position: relative; background: #ecece6; }
+  #canvas { position: absolute; left: 0; top: 0; background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,.14), 0 8px 28px rgba(0,0,0,.08); }
   #background, #overlay { position: absolute; inset: 0; }
   #background { pointer-events: none; }
   #overlay { touch-action: none; cursor: crosshair; }
@@ -51,28 +60,72 @@
   .box-chip-bg.deleted { fill: #b3261e; }
   .box-chip.deleted { text-decoration: line-through; }
   .ghost { fill: none; stroke: #9a9a90; stroke-dasharray: 3 3; stroke-width: 1; }
+  #box-list, #history-list { list-style: none; margin: 0; padding: 0; }
+  #box-list li, #history-list li { display: flex; align-items: center; gap: 6px; padding: 4px 0; border-bottom: 1px solid #eee; }
+  #box-list button, #history-list button { padding: 2px 7px; font-size: 11px; }
+  #box-list .box-list-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; background: none; border: 0; padding: 2px 0; text-align: left; }
+  #box-list .box-list-label.selected { font-weight: 650; }
+  #history-list .history-meta { flex: 1; min-width: 0; font-size: 11px; line-height: 1.35; color: #6e6e66; }
+  #history-list .history-meta strong { color: #1d1d1f; font-weight: 650; }
   #sprites { position: absolute; inset: 0; pointer-events: none; }
   #sprites .sprite { position: absolute; overflow: hidden; box-shadow: 0 2px 10px rgba(0,0,0,.15); background: #fff; outline: 1px solid rgba(124, 58, 237, .4); }
-  #bound-info { font-size: 11px; color: #7c3aed; background: #f5f0ff; border-radius: 5px; padding: 4px 7px; margin-top: 4px; }
+  .box-rect.pending { stroke-width: 2; }
+  .note-dot { fill: #b45309; }
+  .overlay-hidden .box-rect, .overlay-hidden .box-chip, .overlay-hidden .box-chip-bg,
+  .overlay-hidden .ghost, .overlay-hidden .handle, .overlay-hidden .selection-outline, .overlay-hidden .note-dot { display: none; }
+  #grid-lines { pointer-events: none; }
+  aside details { margin: 12px 0 0; }
+  aside details > summary { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: #8a8a80; cursor: pointer; }
+  .check-row { display: flex; align-items: center; gap: 8px; margin: 8px 0; font-size: 12px; color: #6e6e66; }
+  .check-row input { width: auto; }
+  .rect-grid input { width: 100%; }
+  .rect-grid span { font-size: 10px; color: #8a8a80; }
 </style>
 </head>
 <body>
 <header>
   <h1>BoundBox</h1>
   <span class="badge" id="mode-badge">Sketch</span>
-  <span class="spacer"></span>
-  <span class="zoom-group">
-    <button id="zoom-out" title="Zoom out">−</button>
-    <button id="zoom-fit" title="Fit to window">100%</button>
-    <button id="zoom-in" title="Zoom in">+</button>
+  <span id="edit-count" class="badge" hidden></span>
+  <span class="project-status" id="project-status" role="status" aria-live="polite" aria-atomic="true" title="Saved projects live at ./boundbox/project.json">
+    <span id="dirty-dot" hidden aria-label="Unsaved changes">&bull;</span>
+    <span id="project-name">New project</span>
+    <span id="service-status" hidden> &middot; exchange service offline</span>
   </span>
-  <button id="load-source" title="Load ./boundbox/source.wireloom as the background">Load wireframe</button>
-  <button id="reload-source" hidden title="Re-read source.wireloom (pending edits are flushed)">Reload</button>
-  <button id="clear-source" hidden>Clear</button>
-  <button id="copy-json">Copy JSON</button>
+  <span class="header-cluster">
+    <span>Tools</span>
+    <span class="tool-group">
+      <button id="tool-select" title="Select (V)">Select</button>
+      <button id="tool-draw" class="active" title="Draw box (R)">Draw</button>
+      <button id="tool-pan" title="Pan (hold Space)">Pan</button>
+    </span>
+  </span>
+  <span class="header-cluster">
+    <span>View</span>
+    <span class="zoom-group">
+      <button id="zoom-out" title="Zoom out">−</button>
+      <button id="zoom-fit" title="Fit to window">100%</button>
+      <button id="zoom-in" title="Zoom in">+</button>
+    </span>
+    <button id="toggle-overlay" title="Hide overlay boxes (hold Alt)">Overlay</button>
+  </span>
+  <span class="spacer"></span>
+  <span class="header-cluster">
+    <span>Wireframe</span>
+    <button id="load-source" title="Load ./boundbox/source.wireloom as the background">Load</button>
+    <button id="reload-source" hidden title="Re-read source.wireloom (pending edits are flushed)">Reload</button>
+    <button id="clear-source" hidden>Clear</button>
+  </span>
+  <span class="header-cluster">
+    <span>File</span>
+    <button id="reset-workspace" title="Return to a blank canvas without deleting saved files or history">Reset</button>
+    <button id="open-project" title="Open ./boundbox/project.json">Open</button>
+    <button id="save-project" title="Save the complete session to ./boundbox/project.json">Save</button>
+    <button id="copy-json">Copy JSON</button>
+  </span>
   <button id="save" class="primary">Save for AI</button>
 </header>
-<div id="error-banner" hidden>
+<div id="error-banner" role="alert" aria-live="assertive" hidden>
   <span id="error-text"></span>
   <button id="copy-error">Copy error for the AI</button>
   <button id="dismiss-error">Dismiss</button>
@@ -106,10 +159,12 @@
         <label for="prop-text">Literal text</label>
         <input id="prop-text" autocomplete="off" placeholder="The exact words to render">
       </div>
-      <label>Position &amp; size</label>
+      <label>Position &amp; size (px, rough unless grid lock is on)</label>
       <div class="rect-grid">
+        <span>X</span><span>Y</span>
         <input id="prop-x" type="number" title="X" aria-label="X">
         <input id="prop-y" type="number" title="Y" aria-label="Y">
+        <span>W</span><span>H</span>
         <input id="prop-w" type="number" title="Width" aria-label="Width">
         <input id="prop-h" type="number" title="Height" aria-label="Height">
       </div>
@@ -124,15 +179,34 @@
     <label for="ctx-bg">Background (optional)</label>
     <input id="ctx-bg" autocomplete="off" placeholder="e.g. soft gradient, office scene">
 
-    <h2>Canvas</h2>
-    <div class="rect-grid">
-      <input id="canvas-w" type="number" min="64" aria-label="Canvas width">
-      <input id="canvas-h" type="number" min="64" aria-label="Canvas height">
-    </div>
-    <div id="box-count"></div>
+    <h2>Boxes</h2>
+    <label class="check-row" id="pending-filter-wrap" hidden><input id="pending-only" type="checkbox"> Pending edits only</label>
+    <p id="box-list-empty" style="color:#8a8a80;margin:0 0 8px">No boxes yet.</p>
+    <ul id="box-list"></ul>
+
+    <details open>
+      <summary>Canvas &amp; grid</summary>
+      <p style="color:#8a8a80;font-size:12px;line-height:1.4;margin:8px 0">Placement is a rough draft by default so the AI can tidy alignment. Lock to a grid only when you want a uniform snap.</p>
+      <div class="rect-grid">
+        <span>Width</span><span>Height</span>
+        <input id="canvas-w" type="number" min="64" aria-label="Canvas width">
+        <input id="canvas-h" type="number" min="64" aria-label="Canvas height">
+      </div>
+      <label class="check-row"><input id="grid-lock" type="checkbox"> Lock to grid</label>
+      <label for="grid-step">Grid step (canvas px)</label>
+      <input id="grid-step" type="number" min="0" step="any" value="20" aria-label="Grid step in pixels">
+      <div id="box-count"></div>
+    </details>
+
+    <details>
+      <summary>History</summary>
+      <p style="margin:8px 0"><button id="refresh-history" title="Reload journal entries from the exchange service">Refresh history</button></p>
+      <p id="history-empty" style="color:#8a8a80;margin:0">No journal entries yet.</p>
+      <ul id="history-list"></ul>
+    </details>
   </aside>
 </main>
-<div id="toast"></div>
+<div id="toast" role="status" aria-live="polite" aria-atomic="true"></div>
 <script>
 <!--APP_JS-->
 </script>

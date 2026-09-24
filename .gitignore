@@ -1,0 +1,15 @@
+# Installed by npm. If git still lists files here, untrack them with
+# `git rm -r --cached node_modules`.
+node_modules/
+.venv/
+
+# Exchange folder: session state, snapshots, and AI/user payloads.
+# The launcher also writes its own `*` .gitignore inside this directory.
+boundbox/
+
+# Knowledge-graph output from the graphify skill.
+graphify-out/
+
+# OS / editor noise
+.DS_Store
+Thumbs.db

@@ -1,49 +1,68 @@
 ---
 name: boundbox
-description: Launch BoundBox — a JIT visual layout tool — when the user wants to sketch an app/site/image layout as labeled boxes, or mark up an AI-generated Wireloom wireframe with precise edits. Use when the user says "let me sketch it", "open boundbox", "let me draw the layout", or when a design conversation needs the user's visual input instead of prose. Not for rendering wireframes (use wireloom) or for building real UIs.
+description: Launch BoundBox when a user wants to sketch a page, app, image, or level layout as labeled boxes, or visually mark precise changes over a Wireloom wireframe. Use for requests such as "open BoundBox," "let me sketch it," "let me draw the layout," or when visual placement would communicate intent better than prose. Do not use it to render a finished UI.
 ---
 
-# BoundBox Skill (draft — contract slice)
+# BoundBox
 
-BoundBox is launched just-in-time: a local single-file app + a zero-dependency Node server that exits when idle. You (the AI) drive it through files in an exchange folder.
+BoundBox is a just-in-time visual workspace. It runs in the conversation's browser pane and exchanges files through a project-local `boundbox/` folder.
 
-## Launch
+## Start or resume
 
-```bash
-node C:\Users\miket\Repo\BoundBox\launch.mjs --dir ./boundbox
-```
+1. Choose an exchange directory, normally `<project>/boundbox`.
+2. For wireframe iteration, write the complete starting Wireloom document to `source.wireloom` before launch. For a blank sketch, omit it.
+3. Resolve the directory containing this `SKILL.md`, then run:
 
-- Prints `URL: http://127.0.0.1:{port}/{token}/` — give this to the user (or open it in your browser pane).
-- Creates `./boundbox/` (self-gitignored). Re-launching while a session is alive warns and reuses it.
-- The server exits after 30 minutes idle; Ctrl+C stops it sooner. Nothing runs in the background afterward.
+   ```text
+   python <skill-directory>/launch.py --dir <project>/boundbox --on-demand
+   ```
 
-## Exchange contract
+4. Open the printed Streamlit URL in the in-app browser pane. Keep the Python launcher process attached while the pane is in use.
 
-| File | Direction | Meaning |
+If that exchange folder already has a live launcher, a second launch prints the existing URL and exits. Reuse that pane and session.
+
+## Integrated lifecycle
+
+- Treat the browser pane as part of the working app. Do not routinely stop and restart Playwright or the launcher between edits.
+- The page sends a heartbeat while it is open, so the launcher's idle cleanup does not interrupt an active workspace.
+- Browser Refresh is the normal UI restart. It reloads the app and automatically opens a valid saved `project.json`. If there is no project file, it loads `source.wireloom` when that file is present.
+- **Reset workspace** returns the UI to a blank canvas. It intentionally does not delete `project.json`, exports, or history; **Open project** can restore the saved workspace.
+- Closing the pane stops heartbeats. The launcher then exits after its idle timeout, leaving no standing service.
+- Relaunch only when the URL is no longer reachable. Refresh cannot revive a process that was explicitly killed.
+
+## Work with the user
+
+- Blank sketch: let the user draw, label, describe, and order boxes, then use **Save for AI**.
+- Wireframe iteration: write `source.wireloom` before launch (it loads automatically when there is no `project.json`), or have the user click **Load wireframe**. Then move/resize/annotate/delete elements and use **Save edits for AI**.
+- Session continuity: have the user use **Save project** before leaving. Opening the URL later—or refreshing it in the current pane—rehydrates that project.
+- If the user has unsaved changes, do not open or reload another file without their confirmation.
+
+Read [PROMPTS.md](PROMPTS.md) before interpreting an export or writing an AI response. Read [SCHEMA.md](SCHEMA.md) when validating or producing payloads.
+
+## Exchange files
+
+| File | Direction | Purpose |
 |---|---|---|
-| `./boundbox/source.wireloom` | AI → app | Wireframe to load as background (write BEFORE launching for iterate mode; omit for sketch mode) |
-| `./boundbox/boxes.json` | app → AI | Sketch layout: labeled boxes with 0–1000-grid bboxes + project description |
-| `./boundbox/packet.json` | app → AI | Iterate packet: full wireloom source + ordered edit deltas keyed to source lines |
-| `./boundbox/project.json` | app → AI | Saved project (persistence) |
+| `source.wireloom` | AI -> app | Complete Wireloom background/revision |
+| `boxes.json` | app -> AI | Blank-sketch layout on the 0-1000 coordinate grid |
+| `packet.json` | app -> AI | Complete source plus ordered edit intents |
+| `project.json` | app -> app/AI | Versioned workspace state used by Save/Open/Refresh |
+| `history/journal.jsonl` | exchange service | Append-only exchange-file history |
 
-Read outputs after the user says they've saved (or watch mtime). Check freshness before trusting a file from an earlier session.
+Read only the output matching the current mode. Check that it was saved during the current exchange; stale files may coexist intentionally.
+
+When responding to `packet.json`, rewrite the complete Wireloom source, not a diff. Write the revision to `source.wireloom`, then tell the user to click **Reload**. Never discard an unmatched edit silently; explain the conflict and preserve the rest.
 
 ## History and recovery
 
-Every distinct version of every exchange file is snapshotted automatically into `./boundbox/history/` with an append-only `journal.jsonl` ledger (seq, timestamp, direction ai-to-user / user-to-ai, hash, reason). Nothing is ever lost by an overwrite — if something changed and shouldn't have:
+The Python exchange service snapshots every distinct observed version of `source.wireloom`, `boxes.json`, `packet.json`, and `project.json`. Use the bundled history command from the skill directory:
 
-```bash
-node C:\Users\miket\Repo\BoundBox\scripts\history.mjs list --dir ./boundbox
-node C:\Users\miket\Repo\BoundBox\scripts\history.mjs show 3 --dir ./boundbox
-node C:\Users\miket\Repo\BoundBox\scripts\history.mjs restore 3 --dir ./boundbox
+```text
+python <skill-directory>/history.py list --dir <project>/boundbox
+python <skill-directory>/history.py show <seq> --dir <project>/boundbox
+python <skill-directory>/history.py restore <seq> --dir <project>/boundbox
 ```
 
-Restores are themselves journaled. The journal is also served at `GET {url}history`, and you can read `journal.jsonl` directly.
+Inspect before restoring. Avoid restores while the app is actively saving. A restore is itself journaled. The canvas **History** list uses the same service restore path as this command.
 
-## Responding to a packet
-
-Rewrite the COMPLETE wireloom source applying the edits (never a diff), write it to `./boundbox/source.wireloom`, and tell the user to click Reload. If the app reports a parse error, the user will paste it back — fix and rewrite.
-
-## Status
-
-Contract slice only: the page at the URL is a stub proving launch → save → read. The canvas app replaces it in the next slices.
+If project loading reports invalid/newer JSON, leave the live canvas intact and recover from history. If saved Wireloom no longer parses, BoundBox opens a recovery canvas that preserves pending intent; repair `source.wireloom`, then use **Load wireframe** to rebind it before exporting.

@@ -37,8 +37,15 @@ export function editsForBox(box, canvas) {
         : (moved ? { x: bbox[0], y: bbox[1] } : { w: bbox[2], h: bbox[3] }),
     });
   }
-  if (box.note?.trim()) {
-    edits.push({ op: 'annotate', target: targetOf(box), note: box.note.trim() });
+  const semanticIntent = [];
+  if (box.type === 'text') {
+    semanticIntent.push(box.text?.length
+      ? `Treat this element as text with the literal value ${JSON.stringify(box.text)}.`
+      : 'Treat this element as text.');
+  }
+  if (box.note?.trim()) semanticIntent.push(box.note.trim());
+  if (semanticIntent.length) {
+    edits.push({ op: 'annotate', target: targetOf(box), note: semanticIntent.join(' ') });
   }
   return edits;
 }
@@ -53,6 +60,7 @@ export function buildIteratePayload({ boxes, canvas, context, sourceText, source
         op: 'add',
         label: box.label,
         desc: box.description ?? '',
+        type: box.type ?? 'obj',
         bbox: toNormalized(box.rect, canvas),
       };
       if (box.type === 'text' && box.text) entry.text = box.text;
